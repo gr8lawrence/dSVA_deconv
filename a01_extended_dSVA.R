@@ -22,6 +22,10 @@
 # R2 <- Y - X %*% B_star_hat2 
 # t(X) %*% R2 # roughly 0
 
+## Y: bulk expression matrix
+## X: signature matrix
+## q: number of latent variables for adjustment
+
 dsva_ext <- function(Y, X, q) {
   
   ## step 1: obtain the canonical model residual 
