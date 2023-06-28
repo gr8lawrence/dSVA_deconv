@@ -27,9 +27,12 @@
 ## q: number of latent variables for adjustment
 
 dsva_ext <- function(Y, X, q) {
+  n <- ncol(Y)
+  m <- nrow(Y)
   
   ## step 1: obtain the canonical model residual 
   B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+  # B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
   M_x <- X %*% solve(t(X) %*% X) %*% t(X)
   # R <- Y - X %*% B_star_hat # challenge No.1: the residual space isn't orthogonal to columns of X
   R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) # we project the residual to be orthogonal to X
@@ -55,3 +58,34 @@ dsva_ext <- function(Y, X, q) {
 # mean(abs(B - P_hat))
 # mean(abs(B - B_star_hat))
 
+## Use dsva to impute cell-type specific expression adjusting for the hidden covariates
+## X is the proportion matrix: each row represents a samples
+dsva_ext2 <- function(Y, X, q) {
+  n <- nrow(Y)
+  m <- ncol(Y)
+  
+  ## step 1: obtain the canonical model residual 
+  B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
+  # B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
+  U_x <- svd(X)$u
+  M_x <- U_x %*% t(U_x) 
+  # R <- Y - X %*% B_star_hat # challenge No.1: the residual space isn't orthogonal to columns of X
+  R <- (diag(1, n) - M_x) %*% (Y - X %*% B_star_hat) # we project the residual to be orthogonal to X
+  
+  ## step 2: svd on the residual space
+  U_q <- svd(R)$u[, seq(q)] 
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat <- apply(R, 2, function(r) {lsei::lsei(a = U_q, b = r)})
+  # J <- rep(1, n)
+  # M_jn <- J %*% solve(t(J) %*% J) %*% t(J) 
+  M_jn <- matrix(1/m, m, m)
+  D_jn <- diag(1, m) - M_jn
+  Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))  
+  
+  ## step 4: fitting the model again with the surrogate variable
+  X_new <- cbind(Gamma_hat, X)
+  B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = q, sum = NULL)$x})
+  Theta_hat <- B_hat[-seq(q), ]
+  Theta_hat
+}
