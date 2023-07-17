@@ -11,7 +11,7 @@
 # Z <- matrix(rnorm(m * p, 2), m, p)
 # D <- matrix(rnorm(p * n), p, n)
 # E <- matrix(rnorm(m * n, 0, 0.01), m, n)
-# Y <- X %*% B + Z %*% D + E  
+# Y <- X %*% B + Z %*% D + E
 # sum(Y < 0) # make sure this is 0
 # Y[Y < 0] <- 0
 # 
@@ -25,7 +25,7 @@
 ## Y: bulk expression matrix
 ## X: signature matrix
 ## q: number of latent variables for adjustment
-
+## solving P with sum-to-one constraint
 dsva_ext <- function(Y, X, q) {
   n <- ncol(Y)
   m <- nrow(Y)
@@ -33,7 +33,9 @@ dsva_ext <- function(Y, X, q) {
   ## step 1: obtain the canonical model residual 
   B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
   # B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
-  M_x <- X %*% solve(t(X) %*% X) %*% t(X)
+  # M_x <- X %*% solve(t(X) %*% X) %*% t(X)
+  U_x <- svd(X)$u
+  M_x <- U_x %*% t(U_x) 
   # R <- Y - X %*% B_star_hat # challenge No.1: the residual space isn't orthogonal to columns of X
   R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) # we project the residual to be orthogonal to X
   
@@ -55,6 +57,34 @@ dsva_ext <- function(Y, X, q) {
   P_hat
 }
 
+## solving P without sum-to-one constraint
+dsva_ext_nn <- function(Y, X, q) {
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  ## step 1: obtain the canonical model residual 
+  B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
+  U_x <- svd(X)$u
+  M_x <- U_x %*% t(U_x) 
+  R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) # we project the residual to be orthogonal to X
+  
+  ## step 2: svd on the residual space
+  U_q <- svd(R)$u[, seq(q)] 
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat <- apply(R, 2, function(r) {lsei::lsei(a = U_q, b = r)})
+  M_jn <- matrix(1/n, n, n)
+  D_jn <- diag(1, n) - M_jn
+  Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))  
+  
+  ## step 4: fitting the model again with the surrogate variable
+  X_new <- cbind(Gamma_hat, X)
+  B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = q, sum = NULL)$x})
+  P_tilde <- B_hat[-seq(q), ]
+  P_hat <- apply(P_tilde, 2, function(x) x/sum(x))
+  P_hat
+}
+
 # mean(abs(B - P_hat))
 # mean(abs(B - B_star_hat))
 
@@ -67,9 +97,9 @@ dsva_ext2 <- function(Y, X, q) {
   ## step 1: obtain the canonical model residual 
   B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
   # B_star_hat <- apply(Y, 2, function(y) {lsei::nnls(a = X, b = y)$x})
-  U_x <- svd(X)$u
-  M_x <- U_x %*% t(U_x) 
-  # R <- Y - X %*% B_star_hat # challenge No.1: the residual space isn't orthogonal to columns of X
+  # U_x <- svd(X)$u
+  # M_x <- U_x %*% t(U_x) 
+  # R <- Y - X %*% B_star_hat # when B_star is not forced to have sum to 1 constraint, the residual is orthogonal
   R <- (diag(1, n) - M_x) %*% (Y - X %*% B_star_hat) # we project the residual to be orthogonal to X
   
   ## step 2: svd on the residual space
@@ -88,4 +118,99 @@ dsva_ext2 <- function(Y, X, q) {
   B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = q, sum = NULL)$x})
   Theta_hat <- B_hat[-seq(q), ]
   Theta_hat
+}
+
+## alternatively solving the regession problem Y = XB + ZD + E where X and D are known
+solve_reg <- function(Y, X, D, tol = 1e-5, max_iter = 1e4) {
+  
+  ## test data
+  true_data <- dSVA_model_sim(m, n, K, p, p_sig, lambda)
+  Y <- true_data$Y
+  X <- true_data$X
+  D <- true_data$D
+  tol <- 1e-5
+  max_iter <- 1e4
+  
+  ## initialize a B matrix of proportions and an empty Z matrix
+  B <- t(extraDistr::rdirichlet(n = ncol(Y), alpha = rep(1, ncol(X))))
+  Z <- matrix(nrow = nrow(Y), ncol = nrow(D))
+  Y1 <- Y - X %*% B
+  for (j in 1:nrow(Z)) Z[j, ] <- c(lsei::lsei(a = t(D), b = Y1[j, ]))
+  
+  ## record the estimated Y
+  Y_tilde <- X %*% B + Z %*% D 
+  
+  t <- 0
+  if (t <= max_iter) {
+    if (t == max_iter) {
+      warning("Maximal number of iteratinos reached.") 
+      break
+      }
+    t <- t + 1
+    ## then solve B with Z
+    Y2 <- Y - Z %*% D
+    for (i in 1:ncol(B)) B[, i] <- lsei::pnnls(a = X, b = Y2[, i], sum = 1)$x
+    
+    ## solve Z with B
+    Y1 <- Y - X %*% B
+    for (j in 1:nrow(Z)) Z[j, ] <- c(lsei::lsei(a = t(D), b = Y1[j, ]))
+    
+    ## calculate the tolerance
+    Y_hat <- X %*% B + Z %*% D 
+    d <- norm(Y_hat - Y_tilde, "F")^2/(nrow(Y) * ncol(Y))
+    if (d < tol) break
+    Y_tilde <- Y_hat
+  }
+  B - true_data$P_star
+  return(list(B = B, Z = Z))
+}
+
+## update dSVA extension for this setting
+dsva_ext2 <- function(Y, X) {
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  ## step 1: obtain the canonical model residual 
+  B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+  U_x <- svd(X)$u
+  M_x <- U_x %*% t(U_x) 
+  # we project the residual to be orthogonal to X
+  R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) 
+  
+  # estimate q, the number of hidden factors on R, using Horn's method
+  q_ls <- paran::paran(x = R, status = FALSE)
+  q <- q_ls$Retained
+  
+  # if no hidden factor is estimated, return the P_hat from the simplified model
+  if (q == 0) {
+    message("Horn's method detected no latent variables.")
+    return(B_star_hat)
+  }
+  
+  ## step 2: svd on the residual space
+  if (q == 1) {
+    U_q <- as.matrix(svd(R)$u[, seq(q)]) 
+  } else {
+    U_q <- svd(R)$u[, seq(q)]
+  }
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat <- apply(R, 2, function(r) {lsei::lsei(a = U_q, b = r)})
+  M_jn <- matrix(1/n, n, n)
+  D_jn <- diag(1, n) - M_jn
+  
+  if (q == 1) {
+    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% as.matrix(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% as.matrix(Psi_hat))  
+  } else {
+    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))
+  }
+  # Gamma_hat 
+  
+  ## step 4: fitting the model again with the surrogate variable
+  X_new <- cbind(Gamma_hat, X)
+  B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = q, sum = 1)$x})
+  P_hat <- B_hat[-seq(q), ]
+  
+  ## return the P_hat
+  return(P_hat)
 }
