@@ -166,7 +166,7 @@ solve_reg <- function(Y, X, D, tol = 1e-5, max_iter = 1e4) {
 }
 
 ## update dSVA extension for this setting
-dsva_ext2 <- function(Y, X) {
+dsva_ext2 <- function(Y, X, ...) {
   n <- ncol(Y)
   m <- nrow(Y)
   
@@ -178,7 +178,7 @@ dsva_ext2 <- function(Y, X) {
   R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) 
   
   # estimate q, the number of hidden factors on R, using Horn's method
-  q_ls <- paran::paran(x = R, status = FALSE)
+  q_ls <- paran::paran(x = R, ...)
   q <- q_ls$Retained
   
   # if no hidden factor is estimated, return the P_hat from the simplified model
@@ -200,9 +200,19 @@ dsva_ext2 <- function(Y, X) {
   D_jn <- diag(1, n) - M_jn
   
   if (q == 1) {
-    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% as.matrix(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% as.matrix(Psi_hat))  
+    if (Psi_hat %*% D_jn %*% as.matrix(Psi_hat) > 1e-15) {
+      message("q_hat = 1 and Psi_hat %*% D_jn %*% as.matrix(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% as.matrix(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% as.matrix(Psi_hat))  
+    }
   } else {
-    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))
+    if (kappa(Psi_hat %*% D_jn %*% t(Psi_hat)) > 1e-15) {
+      message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))
+    }
   }
   # Gamma_hat 
   
@@ -212,5 +222,153 @@ dsva_ext2 <- function(Y, X) {
   P_hat <- B_hat[-seq(q), ]
   
   ## return the P_hat
-  return(P_hat)
+  return(list(P_hat = P_hat,
+              q_hat = q))
+}
+
+## update dSVA extension for this setting
+## what if we assume we know q = 1
+dsva_ext2_know_q <- function(Y, X, q = 1) {
+  
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  # true_data <- dSVA_model_sim_2(m, n, K, p, p_sig, lambda, gamma)
+  # Y <- true_data$Y
+  # X <- true_data$X
+  # Z <- true_data$Z
+  # D <- true_data$D
+
+  ## step 1: obtain the canonical model residual 
+  # B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+  
+  svd_X <- svd(X)
+  U_x <- svd_X$u
+  Sigma_x <- svd_X$d
+  V_x <- svd_X$v
+  M_x <- U_x %*% t(U_x)
+  B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+  # B_star_hat <- apply(Y, 2, function(y) {lsei::lsei(a = X, b = y)})
+  
+  # U_x <- svd(X)$u
+  # M_x <- U_x %*% t(U_x) 
+  # we project the residual to be orthogonal to X
+  # R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) 
+  R <- Y - X %*% B_star_hat
+  # M_x <- U_x %*% t(U_x) 
+  # 
+  # (diag(1, m) - M_x) %*% Y - R
+  
+  # if no hidden factor is estimated, return the P_hat from the simplified model
+  if (q == 0) {
+    message("Assume no latent variables.")
+    return(B_star_hat)
+  }
+  
+  ## step 2: svd on the residual space
+  if (q == 1) {
+    U_q <- as.matrix(svd(R)$u[, seq(q)]) 
+  } else {
+    U_q <- svd(R)$u[, seq(q)]
+  }
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat <- apply(R, 2, function(r) {lsei::lsei(a = U_q, b = r)})
+  M_jn <- matrix(1/n, n, n)
+  D_jn <- diag(1, n) - M_jn
+  
+  if (q == 1) {
+    if (Psi_hat %*% D_jn %*% as.matrix(Psi_hat) < 1e-15) {
+      message("q_hat = 1 and Psi_hat %*% D_jn %*% as.matrix(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% as.matrix(Psi_hat) %*% (Psi_hat %*% D_jn %*% as.matrix(Psi_hat))^(-1)  
+    }
+  } else {
+    if (kappa(Psi_hat %*% D_jn %*% t(Psi_hat)) < 1e-15) {
+      message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))
+    }
+  }
+  # Gamma_hat 
+  
+  ## step 4: fitting the model again with the surrogate variable
+  X_new <- cbind(Gamma_hat, X)
+  B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = q, sum = 1)$x})
+  # B_hat <- apply(Y, 2, function(y) {lsei::lsei(a = X_new, b = y)})
+  # D_hat <- B_hat[seq(q), ]
+  P_hat <- B_hat[-seq(q), ]
+  
+  # Gamma_hat %*% D_hat - Z %*% D
+  
+  ## return the P_hat
+  return(list(P_hat = P_hat,
+              q_hat = q))
+}
+
+## another version of the dSVA with intercept 
+dsva_ext3_know_q <- function(Y, Theta, q = 1) {
+  
+  # Y <- true_data$Y
+  # Theta <- true_data$X
+  # q <- 1
+  
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  ## build the regression coefficient matrix
+  X <- cbind(diag(1, m, m), Theta)
+  
+  ## step 1: obtain the canonical model residual 
+  B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, k = m, sum = 1)$x})
+  U_x <- svd(X)$u
+  M_x <- U_x %*% t(U_x) 
+  # we project the residual to be orthogonal to X
+  R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) 
+  
+  # if no hidden factor is estimated, return the P_hat from the simplified model
+  if (q == 0) {
+    message("Assume no latent variables.")
+    return(B_star_hat)
+  }
+  
+  ## step 2: svd on the residual space
+  if (q == 1) {
+    U_q <- as.matrix(svd(R)$u[, seq(q)]) 
+  } else {
+    U_q <- svd(R)$u[, seq(q)]
+  }
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat <- apply(R, 2, function(r) {lsei::lsei(a = U_q, b = r)})
+  M_jn <- matrix(1/n, n, n)
+  D_jn <- diag(1, n) - M_jn
+  
+  if (q == 1) {
+    if (Psi_hat %*% D_jn %*% as.matrix(Psi_hat) > 1e-15) {
+      message("q_hat = 1 and Psi_hat %*% D_jn %*% as.matrix(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% as.matrix(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% as.matrix(Psi_hat))  
+    }
+  } else {
+    if (kappa(Psi_hat %*% D_jn %*% t(Psi_hat)) > 1e-15) {
+      message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is singular, Gamma_hat is assigned to equal U_q.")
+      Gamma_hat <- U_q
+    } else {
+      Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% solve(Psi_hat %*% D_jn %*% t(Psi_hat))
+    }
+  }
+  # Gamma_hat 
+  
+  ## step 4: fitting the model again with the surrogate variable (the first m + q variables are not NN-restricted)
+  X_new <- cbind(Gamma_hat, X)
+  B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = m + q, sum = 1)$x})
+  P_hat <- B_hat[-seq(m + q), ]
+  
+  ## return the P_hat
+  return(list(P_hat = P_hat,
+              q_hat = q))
 }
