@@ -25,6 +25,7 @@ library(sva)
 library(DescTools)
 library(microbenchmark)
 set.seed(100)
+B <- 5 # run every simulation B times!
 ```
 
 ## Model
@@ -98,7 +99,7 @@ gamma_seq <- 1:3
 In the first set of simulation, we assume that we know $q$ perfectly.
 
 ```{r simulation_code_case_1_q_known, echo = FALSE, message = FALSE, warning = FALSE}
-B <- 100 # run the simulation B times
+# run the simulation B times
 par(mfrow = c(1, 3))
 result_matrix <- matrix(nrow = B, ncol = 12)
 for (gamma in gamma_seq) {
@@ -169,9 +170,9 @@ for (gamma in gamma_seq) {
 
 If the $q$ is unknown, we need to estimate the value of $q$, which could be accomplished by using Horn's parallel analysis (PA). This takes a few minutes to run.
 
-```{r simulation_code_case_1_q_unknown, echo = FALSE, message = FALSE, warning = FALSE}
+```{r simulation_code_case_1_q_unknown, echo = FALSE, results="hide", message = FALSE, warning = FALSE}
 ## Assume that q is unknown
-B <- 100 # run the simulation B times
+# run the simulation B times
 par(mfrow = c(2, 2))
 result_matrix <- matrix(nrow = B, ncol = 12)
 q_hats <- vector(mode = "double", length = B)
@@ -243,7 +244,83 @@ for (gamma in gamma_seq) {
 }  
 ```
 
-This shows that even though the number of factors $q$ in each simulation is grossly overestimated, the resultant dSVA results are still an improvement from the rest.
+This shows that when the number of factors $q$ in each simulation is grossly overestimated, the resultant dSVA results are not much better than the rest.
+
+To improve this, we use another way to estimate the residuals for Horn's PA:
+```{r simulation_code_case_1_q_unknown_alt_res, echo = FALSE, results = "hide", message = FALSE, warning = FALSE}
+## Assume that q is unknown
+par(mfrow = c(2, 2))
+result_matrix <- matrix(nrow = B, ncol = 12)
+q_hats <- vector(mode = "double", length = B)
+
+for (gamma in gamma_seq) {
+  for (b in 1:B) {
+    true_data <- dSVA_model_sim_intercept(m, n, K, p, p_sig, lambda, gamma)
+    
+    ## dSVA
+    dsva_ls <- dsva_ext(Y = true_data$Y, 
+                        X = true_data$X, 
+                        alt_res = TRUE,
+                        quietly = TRUE, 
+                        status = FALSE)
+    P_dsva <- dsva_ls$P_hat
+    q_hats[b] <- dsva_ls$q_hat
+  
+    ## NNLS
+    P_nnls <- apply(true_data$Y, 2, function(y) {lsei::nnls(a = true_data$X, b = y)$x})
+    P_nnls <- apply(P_nnls, 2, function(x) x/sum(x))
+    
+    ## constrained NNLS
+    P_pnnls <- apply(true_data$Y, 2, function(y) {lsei::pnnls(a = true_data$X, b = y, sum = 1)$x})
+    
+    ## if we know both X and Z
+    P_hat <- apply(true_data$Y - true_data$Z %*% true_data$D, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
+    
+    ## mean sample-wise correlations
+    cor_dsva <- mean(my_cor(true_data$P_star, P_dsva))
+    cor_nnls <- mean(my_cor(true_data$P_star, P_nnls))
+    cor_pnnls <- mean(my_cor(true_data$P_star, P_pnnls))
+    cor_best <- mean(my_cor(true_data$P_star, P_hat))
+    
+    ## mean CCC
+    ccc_dsva <- mean(my_ccc(true_data$P_star, P_dsva))
+    ccc_nnls <- mean(my_ccc(true_data$P_star, P_nnls))
+    ccc_pnnls <- mean(my_ccc(true_data$P_star, P_pnnls))
+    ccc_best <- mean(my_ccc(true_data$P_star, P_hat))
+    
+    ## mean squared errors
+    mse_dsva <- my_mse(true_data$P_star, P_dsva)
+    mse_nnls <- my_mse(true_data$P_star, P_nnls)
+    mse_pnnls <- my_mse(true_data$P_star, P_pnnls)
+    mse_best <- my_mse(true_data$P_star, P_hat)
+    
+    result_matrix[b, ] <- c(cor_dsva, cor_nnls, cor_pnnls, cor_best, 
+                            ccc_dsva, ccc_nnls, ccc_pnnls, ccc_best,
+                            mse_dsva, mse_nnls, mse_pnnls, mse_best)
+  }
+  result_df <- as_tibble(cbind(1:B, result_matrix))
+  colnames(result_df) <- c("b", 
+                           "cor_dsva", "cor_nnls", "cor_pnnls", "cor_known",
+                           "ccc_dsva", "ccc_nnls", "ccc_pnnls", "ccc_known", 
+                           "mse_dsva", "mse_nnls", "mse_pnnls", "mse_known")
+  boxplot(result_df$cor_dsva, result_df$cor_nnls, result_df$cor_pnnls, result_df$cor_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Pearson's Correlation",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$ccc_dsva, result_df$ccc_nnls, result_df$ccc_pnnls, result_df$ccc_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "CCC",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$mse_dsva, result_df$mse_nnls, result_df$mse_pnnls, result_df$mse_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "MSE",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  hist(q_hats,
+       # main = "Estimated Number of Latent Factors by Horn's PA",
+       xlab = "Estimated q")
+}  
+```
+
 
 ### Case 2: latent variable strengthens the expression of one cell type
 
@@ -257,8 +334,8 @@ Let us assume that the latent variables increases the cell-type specific express
 
 #### When $q$ is known
 
-```{r simulation_code_case_2_q_known, echo = FALSE, message = FALSE, warning = FALSE}
-B <- 100 # run the simulation B times
+```{r simulation_code_case_2_q_known, echo = FALSE, results = "hide", message = FALSE, warning = FALSE}
+# run the simulation B times
 par(mfrow = c(1, 3))
 result_matrix <- matrix(nrow = B, ncol = 12)
 
@@ -326,9 +403,9 @@ for (gamma in gamma_seq) {
 ```
 
 #### When $q$ is unknown:
-```{r simulation_code_case_2_q_unknown, echo = FALSE, message = FALSE, warning = FALSE}
+```{r simulation_code_case_2_q_unknown, echo = FALSE, results = "hide", message = FALSE, warning = FALSE}
 ## Assume that q is unknown
-B <- 100 # run the simulation B times
+# run the simulation B times
 par(mfrow = c(2, 2))
 result_matrix <- matrix(nrow = B, ncol = 12)
 q_hats <- vector(mode = "double", length = B)
@@ -399,3 +476,81 @@ for (gamma in gamma_seq) {
        xlab = "Estimated q")
 }  
 ```
+
+It is curious to see that, in this case, overestimating $q$ helps with the results! Comparably, if we use the alternative way to eastimate $q$ and improve it:
+
+```{r simulation_code_case_2_q_unknown_alt_res, echo = FALSE, results = "hide", message = FALSE, warning = FALSE}
+## Assume that q is unknown
+# run the simulation B times
+par(mfrow = c(2, 2))
+result_matrix <- matrix(nrow = B, ncol = 12)
+q_hats <- vector(mode = "double", length = B)
+
+for (gamma in gamma_seq) {
+  for (b in 1:B) {
+    true_data <- dSVA_model_sim_ct_strengthen(m, n, K, p, p_sig, lambda, gamma)
+    
+    ## dSVA
+    dsva_ls <- dsva_ext(Y = true_data$Y, 
+                        X = true_data$X, 
+                        alt_res = TRUE,
+                        quietly = TRUE, 
+                        status = FALSE)
+    P_dsva <- dsva_ls$P_hat
+    q_hats[b] <- dsva_ls$q_hat
+  
+    ## NNLS
+    P_nnls <- apply(true_data$Y, 2, function(y) {lsei::nnls(a = true_data$X, b = y)$x})
+    P_nnls <- apply(P_nnls, 2, function(x) x/sum(x))
+    
+    ## constrained NNLS
+    P_pnnls <- apply(true_data$Y, 2, function(y) {lsei::pnnls(a = true_data$X, b = y, sum = 1)$x})
+    
+    ## if we know both X and Z
+    P_hat <- apply(true_data$Y - true_data$Z %*% true_data$D, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
+    
+    ## mean sample-wise correlations
+    cor_dsva <- mean(my_cor(true_data$P_star, P_dsva))
+    cor_nnls <- mean(my_cor(true_data$P_star, P_nnls))
+    cor_pnnls <- mean(my_cor(true_data$P_star, P_pnnls))
+    cor_best <- mean(my_cor(true_data$P_star, P_hat))
+    
+    ## mean CCC
+    ccc_dsva <- mean(my_ccc(true_data$P_star, P_dsva))
+    ccc_nnls <- mean(my_ccc(true_data$P_star, P_nnls))
+    ccc_pnnls <- mean(my_ccc(true_data$P_star, P_pnnls))
+    ccc_best <- mean(my_ccc(true_data$P_star, P_hat))
+    
+    ## mean squared errors
+    mse_dsva <- my_mse(true_data$P_star, P_dsva)
+    mse_nnls <- my_mse(true_data$P_star, P_nnls)
+    mse_pnnls <- my_mse(true_data$P_star, P_pnnls)
+    mse_best <- my_mse(true_data$P_star, P_hat)
+    
+    result_matrix[b, ] <- c(cor_dsva, cor_nnls, cor_pnnls, cor_best, 
+                            ccc_dsva, ccc_nnls, ccc_pnnls, ccc_best,
+                            mse_dsva, mse_nnls, mse_pnnls, mse_best)
+  }
+  result_df <- as_tibble(cbind(1:B, result_matrix))
+  colnames(result_df) <- c("b", 
+                           "cor_dsva", "cor_nnls", "cor_pnnls", "cor_known",
+                           "ccc_dsva", "ccc_nnls", "ccc_pnnls", "ccc_known", 
+                           "mse_dsva", "mse_nnls", "mse_pnnls", "mse_known")
+  boxplot(result_df$cor_dsva, result_df$cor_nnls, result_df$cor_pnnls, result_df$cor_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Pearson's Correlation",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$ccc_dsva, result_df$ccc_nnls, result_df$ccc_pnnls, result_df$ccc_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "CCC",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$mse_dsva, result_df$mse_nnls, result_df$mse_pnnls, result_df$mse_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "MSE",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  hist(q_hats,
+       # main = "Estimated Number of Latent Factors by Horn's PA",
+       xlab = "Estimated q")
+}  
+```
+

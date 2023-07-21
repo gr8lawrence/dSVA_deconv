@@ -19,7 +19,7 @@ dsva_ext_know_q <- function(Y, X, q = 1) {
   U_x <- svd_X$u
   Sigma_x <- svd_X$d
   V_x <- svd_X$v
-  M_x <- U_x %*% t(U_x)
+  # M_x <- U_x %*% t(U_x)
   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
   R <- Y - X %*% B_star_hat
   
@@ -79,7 +79,7 @@ dsva_ext_know_q <- function(Y, X, q = 1) {
 }
 
 ## update dSVA extension for this setting
-dsva_ext <- function(Y, X, ...) {
+dsva_ext <- function(Y, X, alt_res = FALSE, ...) {
   n <- ncol(Y)
   m <- nrow(Y)
   
@@ -91,7 +91,6 @@ dsva_ext <- function(Y, X, ...) {
   U_x <- svd_X$u
   Sigma_x <- svd_X$d
   V_x <- svd_X$v
-  M_x <- U_x %*% t(U_x)
   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
   R <- Y - X %*% B_star_hat
   
@@ -106,7 +105,14 @@ dsva_ext <- function(Y, X, ...) {
   # however, using this R to estimate q will lead to a lot of biases (won't estimate correctly most of the times)
   
   # now use Horn's PA to estimate the number of factors q in the residual
-  q_ls <- paran::paran(x = R, ...)
+  if (alt_res) {
+    M_x <- U_x %*% t(U_x)
+    B2 <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+    R2 <- (diag(1, m) - M_x) %*% (Y - X %*% B2) # R2 is actually best
+    q_ls <- paran::paran(x = R2, ...)
+  } else {
+    q_ls <- paran::paran(x = R, ...)
+  }
   q <- q_ls$Retained 
   # R3 <- Y - X %*% B2 
   # if no hidden factor is estimated, return the P_hat from the simplified model
@@ -155,7 +161,6 @@ dsva_ext <- function(Y, X, ...) {
   return(list(P_hat = P_hat,
               q_hat = q))
 }
-
 
 ## estimate the eigenvalues
 
