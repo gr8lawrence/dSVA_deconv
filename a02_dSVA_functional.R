@@ -99,15 +99,15 @@ dsva_ext <- function(Y, X, ...) {
   # however, using this R to estimate q will lead to a lot of biases (won't estimate correctly most of the times)
   # estimate the pNNLS residual instead
   # B2 <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
-  # we project the residual to be orthogonal to X
+  # # we project the residual to be orthogonal to X
   # R2 <- (diag(1, m) - M_x) %*% (Y - X %*% B2) # R2 is actually best
-  # R3 <- Y - X %*% B2 
-
+  # R3 <- Y - X %*% B2
+  # however, using this R to estimate q will lead to a lot of biases (won't estimate correctly most of the times)
   
   # now use Horn's PA to estimate the number of factors q in the residual
   q_ls <- paran::paran(x = R, ...)
-  q <- q_ls$Retained
-  
+  q <- q_ls$Retained 
+  # R3 <- Y - X %*% B2 
   # if no hidden factor is estimated, return the P_hat from the simplified model
   if (q == 0) {
     message("Assume no latent variables.")
