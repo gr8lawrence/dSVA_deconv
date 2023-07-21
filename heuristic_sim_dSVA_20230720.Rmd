@@ -1,12 +1,12 @@
 ---
-title: "Simulation to Find Latent Variable Effects with an Intercept"
+title: "Simulation to Find Latent Variable Effects"
 author: "Tianyi Liu"
 date: "2023-07-18"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE, warning = FALSE, message = FALSE, fig.align = 'center')
 options(scipen = 1, digits = 3)
 ```
 
@@ -47,7 +47,9 @@ Notations for dimensions are as follows:
 
 ## dSVA Algorithm
 
-To properly run the dSVA algorithm, we need to figure out what regression is needed in each step. In step
+To properly run the dSVA algorithm, we need to figure out what regression is needed in each step. The 
+
+![dSVA for deconvolution](images/dsvadecon-17.jpg)
 
 ## Simulations
 
@@ -91,13 +93,14 @@ lambda <- 5
 gamma_seq <- 1:3
 ```
 
-```{r simulation_code, echo = FALSE, message = FALSE, warning = FALSE}
+#### If $q$ is known:
+
+In the first set of simulation, we assume that we know $q$ perfectly.
+
+```{r simulation_code_case_1_q_known, echo = FALSE, message = FALSE, warning = FALSE}
 B <- 100 # run the simulation B times
 par(mfrow = c(1, 3))
 result_matrix <- matrix(nrow = B, ncol = 12)
-q_hats_int <- vector(mode = "double", length = B)
-q_hats_null <- vector(mode = "double", length = B)
-
 for (gamma in gamma_seq) {
   for (b in 1:B) {
     # gamma = 2
@@ -105,7 +108,7 @@ for (gamma in gamma_seq) {
     true_data <- dSVA_model_sim_intercept(m, n, K, p, p_sig, lambda, gamma)
     
     ## dSVA
-    P_dsva <- dsva_ext2_know_q(Y = true_data$Y, X = true_data$X)$P_hat
+    P_dsva <- dsva_ext_know_q(Y = true_data$Y, X = true_data$X)$P_hat
   
     ## NNLS
     P_nnls <- apply(true_data$Y, 2, function(y) {lsei::nnls(a = true_data$X, b = y)$x})
@@ -162,7 +165,88 @@ for (gamma in gamma_seq) {
 }
 ```
 
+#### If $q$ is unknown:
+
+If the $q$ is unknown, we need to estimate the value of $q$, which could be accomplished by using Horn's parallel analysis (PA).
+
+```{r simulation_code_case_1_q_unknown, echo = FALSE, message = TRUE, warning = FALSE}
+## Assume that q is unknown
+B <- 100 # run the simulation B times
+par(mfrow = c(2, 2))
+result_matrix <- matrix(nrow = B, ncol = 12)
+q_hats <- vector(mode = "double", length = B)
+
+for (gamma in gamma_seq) {
+  for (b in 1:B) {
+    true_data <- dSVA_model_sim_intercept(m, n, K, p, p_sig, lambda, gamma)
+    
+    ## dSVA
+    dsva_ls <- dsva_ext(Y = true_data$Y, 
+                        X = true_data$X, 
+                        quietly = TRUE, 
+                        status = FALSE)
+    P_dsva <- dsva_ls$P_hat
+    q_hats[b] <- dsva_ls$q_hat
+  
+    ## NNLS
+    P_nnls <- apply(true_data$Y, 2, function(y) {lsei::nnls(a = true_data$X, b = y)$x})
+    P_nnls <- apply(P_nnls, 2, function(x) x/sum(x))
+    
+    ## constrained NNLS
+    P_pnnls <- apply(true_data$Y, 2, function(y) {lsei::pnnls(a = true_data$X, b = y, sum = 1)$x})
+    
+    ## if we know both X and Z
+    P_hat <- apply(true_data$Y - true_data$Z %*% true_data$D, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
+    
+    ## mean sample-wise correlations
+    cor_dsva <- mean(my_cor(true_data$P_star, P_dsva))
+    cor_nnls <- mean(my_cor(true_data$P_star, P_nnls))
+    cor_pnnls <- mean(my_cor(true_data$P_star, P_pnnls))
+    cor_best <- mean(my_cor(true_data$P_star, P_hat))
+    
+    ## mean CCC
+    ccc_dsva <- mean(my_ccc(true_data$P_star, P_dsva))
+    ccc_nnls <- mean(my_ccc(true_data$P_star, P_nnls))
+    ccc_pnnls <- mean(my_ccc(true_data$P_star, P_pnnls))
+    ccc_best <- mean(my_ccc(true_data$P_star, P_hat))
+    
+    ## mean squared errors
+    mse_dsva <- my_mse(true_data$P_star, P_dsva)
+    mse_nnls <- my_mse(true_data$P_star, P_nnls)
+    mse_pnnls <- my_mse(true_data$P_star, P_pnnls)
+    mse_best <- my_mse(true_data$P_star, P_hat)
+    
+    result_matrix[b, ] <- c(cor_dsva, cor_nnls, cor_pnnls, cor_best, 
+                            ccc_dsva, ccc_nnls, ccc_pnnls, ccc_best,
+                            mse_dsva, mse_nnls, mse_pnnls, mse_best)
+  }
+  result_df <- as_tibble(cbind(1:B, result_matrix))
+  colnames(result_df) <- c("b", 
+                           "cor_dsva", "cor_nnls", "cor_pnnls", "cor_known",
+                           "ccc_dsva", "ccc_nnls", "ccc_pnnls", "ccc_known", 
+                           "mse_dsva", "mse_nnls", "mse_pnnls", "mse_known")
+  boxplot(result_df$cor_dsva, result_df$cor_nnls, result_df$cor_pnnls, result_df$cor_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Pearson's Correlation",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$ccc_dsva, result_df$ccc_nnls, result_df$ccc_pnnls, result_df$ccc_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "CCC",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  boxplot(result_df$mse_dsva, result_df$mse_nnls, result_df$mse_pnnls, result_df$mse_known, 
+          main = paste0("gamma = ", gamma), xlab = "Method", ylab = "MSE",
+          col = c("violet", "orange", "azure", "lightpink"))
+  axis(1, at = c("1", "2", "3", "4"), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
+  hist(q_hats,
+       # main = "Estimated Number of Latent Factors by Horn's PA",
+       xlab = "Estimated q")
+}  
+```
+
+
 ### Case 2: latent variable strengthens the expression of one cell type
+
+Let us assume that the latent variables increases the cell-type specific expression of Cell Type 1 to $\gamma$ times as high.
 
   * $\mathbf{z}_1 = \gamma * \mathbf{\theta}^*_1$.
   
@@ -170,7 +254,7 @@ for (gamma in gamma_seq) {
   Z[, 1] <- W * rchisq(n = m, df = gamma * 200) + (1 - W) * rchisq(n = m, df = 200)
 ```
 
-Let us assume that the latent variables increases the cell-type specific expression of Cell Type 1 to $\gamma$ times as high:
+#### When $q$ is known
 
 ```{r simulation_code_st, echo = FALSE, message = FALSE, warning = FALSE}
 B <- 100 # run the simulation B times
@@ -182,7 +266,7 @@ for (gamma in gamma_seq) {
     true_data <- dSVA_model_sim_intercept(m, n, K, p, p_sig, lambda, gamma)
     
     ## dSVA
-    dsva_ls <- dsva_ext2_know_q(Y = true_data$Y, 
+    dsva_ls <- dsva_ext_know_q(Y = true_data$Y, 
                          X = true_data$X)
     P_dsva <- dsva_ls$P_hat
     # q_hats[b] <- dsva_ls$q_hat
@@ -242,48 +326,4 @@ for (gamma in gamma_seq) {
 }
 ```
 
-## The role of PCA (And Why Case 1 and 2?)
-
-We can use a PCA plot to show that indeed, the one simulated latent variable captures a lot of variability:
-
-```{r draw.pc}
-## set parameters
-n <- 20
-m <- 1000
-K <- 5
-p <- 1
-p_sig <- 0.5
-lambda <- 5
-gamma <- 2
-
-## get one set of truths
-true_data <- dSVA_model_sim_2(m, n, K, p, p_sig, lambda, gamma)
-colnames(true_data$Y) <- paste0("sample", 1:ncol(true_data$Y))
-metadat <- tibble(group = c(rep("A", floor(n/2)), rep("B", ceiling(n/2))),
-                  names = colnames(true_data$Y))
-rownames(metadat) <- colnames(true_data$Y)
-Y_pca <- PCAtools::pca(mat = true_data$Y, metadata = metadat, removeVar = 0.1)
-PCAtools::biplot(pcaobj = Y_pca)
-```
-
-SVA requires a sample-wise covatiate matrix (e.g., cancer status) and a null covariate matrix (intercept only), which corresponds to the cell-type proportions in deconvolution. Hence, we can't use SVA for deconvolution.
-```{r run.sva, eval = FALSE}
-# n.sv <- sva::num.sv(dat = true_data$Y,
-#                     mod = true_data$X,
-#                     method = "be")
-# 
-# dims <- dim(true_data$Y)
-# mod = true_data$X
-# diag(dims[2]) %>% dim
-```
-
-```{r run.dsva, eval = FALSE}
-# use Horn's method to estimate the number of hidden factors
-
-# run dSVA using the estimated 
-P_dSVA <- dsva_ext2(Y = true_data$Y, X = true_data$X, 
-                    quietly = TRUE, status = FALSE)
-microbenchmark(dsva_ext2(Y = true_data$Y, X = true_data$X, 
-                         quietly = TRUE, status = FALSE))
-```
-
+#### When $q$ is unknown:

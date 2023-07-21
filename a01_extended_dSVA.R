@@ -178,7 +178,7 @@ dsva_ext2 <- function(Y, X, ...) {
   R <- (diag(1, m) - M_x) %*% (Y - X %*% B_star_hat) 
   
   # estimate q, the number of hidden factors on R, using Horn's method
-  q_ls <- paran::paran(x = R, ...)
+  q_ls <- invisible(paran::paran(x = R, ...))
   q <- q_ls$Retained
   
   # if no hidden factor is estimated, return the P_hat from the simplified model
