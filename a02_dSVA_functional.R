@@ -4,6 +4,13 @@ dsva_ext_know_q <- function(Y, X, q = 1) {
   n <- ncol(Y)
   m <- nrow(Y)
   
+  # if no hidden factor is estimated, return the P_hat from the simplified model
+  if (q == 0) {
+    message("Assume no latent variables.")
+    B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+    return(B_star_hat)
+  }
+  
   # Y <- true_data$Y
   # X <- true_data$X
   # q = 1
@@ -15,12 +22,6 @@ dsva_ext_know_q <- function(Y, X, q = 1) {
   M_x <- U_x %*% t(U_x)
   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
   R <- Y - X %*% B_star_hat
-
-  # if no hidden factor is estimated, return the P_hat from the simplified model
-  if (q == 0) {
-    message("Assume no latent variables.")
-    return(B_star_hat)
-  }
   
   ## step 2: svd on the residual space
   if (q == 1) {
@@ -111,6 +112,7 @@ dsva_ext <- function(Y, X, ...) {
   # if no hidden factor is estimated, return the P_hat from the simplified model
   if (q == 0) {
     message("Assume no latent variables.")
+    B_star_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
     return(B_star_hat)
   }
   
