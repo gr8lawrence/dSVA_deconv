@@ -25,7 +25,7 @@ library(sva)
 library(DescTools)
 library(microbenchmark)
 set.seed(100)
-B <- 5 # run every simulation B times!
+B <- 100 # run every simulation B times!
 ```
 
 ## Model
