@@ -19,7 +19,7 @@ get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
 ## TODO: simulate when q = 2, 3, 4 (1 discrete + 1 continuous, 1 discrete + 2 continuous, 2 discrete + 2 continuous)
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -37,13 +37,53 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1, p_sig = 0.5, lambda = 3, ga
   # Z <- matrix(nrow = m, ncol = q)
   D <- matrix(nrow = q, ncol = n)
   D[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  if (q >= 2) {
+    ## add another continuous feature (purely positive)
+    D[2, ] <- rchisq(n = n, df = 30)
+  }  
+  if (q >= 3) {
+    ## add another continuous feature (could be negative)
+    # D[3, ] <- 
+  }
+  if (q == 4) {
+    ## add another discrete feature
+    # D[4, ] <- 
+  }
   ## choose half of the 0, 1 group to be up regulated
   
   ## encode the latent effects of the binary groups directly instead of using Z * D
   Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma)
+  if (q >= 2) {
+    Y_lat2 <- matrix(0, nrow = m, ncol = n)
+    W2 <- extraDistr::rbern(m, 0.5)
+    for (i in 1:n) {
+      # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/2) + (1 - W) * rchisq(m, df = chi_df/2)) * D[2, i]
+      Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * D[2, i]
+    }
+    Y_lat <- Y_lat + Y_lat2
+  }
+  # if (q >= 3) {
+  #   Y_lat3 <- matrix(0, nrow = m, ncol = n)
+  #   W3 <- extraDistr::rbern(m, 0.4)
+  # }
   
-  ## generate the measurement error)
+  ## generate the measurement error
   Y <- Y_reg + Y_lat 
+  
+  if (err) {
+    E <- matrix(0, nrow = m, ncol = n)
+    for (i in 1:m) {
+      E[i, ] <- rnorm(n, mean(Y_reg[i, ]), sqrt(mean(Y_reg[i, ])/5))
+    }
+    Y <- Y + E
+  } else {
+    E <- NA
+  }
+  
+  ## get the proportion of Y being negative
+  p_neg <- sum(Y < 0)/(m * n)
+  Y[Y < 0] <- 0
+  
   
   ## gather the results into a list
   ls <- list(X = X,
@@ -51,7 +91,9 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1, p_sig = 0.5, lambda = 3, ga
              P_star = P_star,
              D = D,
              Y = Y,
-             Y_lat = Y_lat)
+             E = E,
+             Y_lat = Y_lat,
+             p_neg = p_neg)
   return(ls)
 }
 

@@ -6,14 +6,15 @@ set.seed(100)
 n <- 20
 m <- 1000
 K <- 5
-p <- 1
+q <- 2
+err <- TRUE
 p_sig <- 0.5
 lambda <- 5
 # gamma <- 3
 gamma_seq <- 1:3
 
 ## partition the canvas
-pdf("plots/simulation_with_binary_latent_factor_q_1_no_error.pdf")
+pdf("plots/simulation_with_latent_factor_q_2_with_error.pdf")
 par(mfrow = c(3, 1))
 result_matrix <- matrix(ncol = 11)
 ## simulation functions
@@ -21,12 +22,12 @@ for (gamma in gamma_seq) {
   for (b in 1:B) {
     ## create a list to hold all the estimated proportions
     P_hat_ls <- list()
-    true_data <- dSVA_model_sim_intercept(m, n, K, p, p_sig, lambda, gamma)
+    true_data <- dSVA_model_sim_intercept(m, n, K, q, p_sig, lambda, gamma, err = err)
     
     ## dSVA
-    P_hat_ls$dSVA_no_int <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = 1,
+    P_hat_ls$dSVA_no_int <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = q,
                                          intercept = FALSE)
-    P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = 1)
+    P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = q)
     
     ## NNLS
     P_hat_ls$nnls_no_int <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "nnls", 
@@ -76,6 +77,7 @@ for (gamma in gamma_seq) {
           data = result_df_long, 
           subset = metric == "cor",
           main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Pearson's correlation",
+          las = 2,
           col = c("violet", "orange", "azure", "lightpink"))
   #axis(1, at = as.character(seq(nlevels(result_df_long$method))), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
   
@@ -83,13 +85,15 @@ for (gamma in gamma_seq) {
           data = result_df_long, 
           subset = metric == "ccc",
           main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Concordance correlation coefficient",
+          las = 2,
           col = c("violet", "orange", "azure", "lightpink"))
   #axis(1, at = as.character(seq(nlevels(result_df_long$method))), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
   
   boxplot(value ~ method,
           data = result_df_long, 
-          subset = metric == "ccc",
+          subset = metric == "mse",
           main = paste0("gamma = ", gamma), xlab = "Method", ylab = "Mean squared error",
+          las = 2,
           col = c("violet", "orange", "azure", "lightpink"))
   #axis(1, at = as.character(seq(nlevels(result_df_long$method))), labels = c("dSVA", "NNLS", "PNNLS", "Known"))
   # hist(q_hats, 
