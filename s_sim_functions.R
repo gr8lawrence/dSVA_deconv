@@ -19,7 +19,7 @@ get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
 ## TODO: simulate when q = 2, 3, 4 (1 discrete + 1 continuous, 1 discrete + 2 continuous, 2 discrete + 2 continuous)
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, small_effect = FALSE) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -40,6 +40,7 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   if (q >= 2) {
     ## add another continuous feature (purely positive)
     D[2, ] <- rchisq(n = n, df = 30)
+    # D[2, ] <- abs(rnorm(n = n, mean = 5, sd = 1))
   }  
   if (q >= 3) {
     ## add another continuous feature (could be negative)
@@ -52,13 +53,18 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   ## choose half of the 0, 1 group to be up regulated
   
   ## encode the latent effects of the binary groups directly instead of using Z * D
-  Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma)
+  if (small_effect) {
+    Y_lat <- get_Y_lat_small_effects(m, n, chi_df, gamma, W)
+  } else {
+    Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma, W)
+  }
   if (q >= 2) {
     Y_lat2 <- matrix(0, nrow = m, ncol = n)
     W2 <- extraDistr::rbern(m, 0.5)
     for (i in 1:n) {
-      # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/2) + (1 - W) * rchisq(m, df = chi_df/2)) * D[2, i]
-      Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * D[2, i]
+      # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/4) + (1 - W) * rchisq(m, df = chi_df/4)) * D[2, i]
+      # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * D[2, i]
+      Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * D[2, i]
     }
     Y_lat <- Y_lat + Y_lat2
   }
@@ -97,7 +103,7 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   return(ls)
 }
 
-get_Y_lat_binary <- function(m, n, chi_df, gamma) {
+get_Y_lat_binary <- function(m, n, chi_df, gamma, W) {
   Y_lat <- matrix(0, m, n)
   
   ## for the group where D = 0, select m/4 genes that increase in expression
@@ -115,3 +121,23 @@ get_Y_lat_binary <- function(m, n, chi_df, gamma) {
   ## return Y_lat
   Y_lat
 }
+
+get_Y_lat_small_effects <- function(m, n, chi_df, gamma, W) {
+  Y_lat <- matrix(0, m, n)
+  
+  ## for the group where D = 0, select m/4 genes that increase in expression
+  m1 <- ceiling(m/4)
+  n1 <- floor(n/2)
+  W1 <- W[seq(m1)]
+  Y_lat[seq(m1), seq(n1)] <- W1 * rnorm(n = m1 * n1, mean = gamma * chi_df, sd = sqrt(chi_df/3)) + (1 - W1) * rnorm(n = m1 * n1, mean = chi_df, sd = sqrt(chi_df/3))
+  
+  ## for the group where D = 1, do the same
+  m2 <- floor(m/4)
+  n2 <- ceiling(n/2)
+  W2 <- W[seq(m - m2 + 1, m)]
+  Y_lat[seq(m - m2 + 1, m), seq(n - n2 + 1, n)] <- W2 * rnorm(n = m2 * n2, mean = gamma * chi_df, sd = sqrt(chi_df/3)) + (1 - W2) * rnorm(n = m2 * n2, mean = chi_df, sd = sqrt(chi_df/3))
+  
+  ## return Y_lat
+  Y_lat
+}
+

@@ -27,17 +27,22 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
   R <- Y - X %*% B_star_hat
   
   ## step 2: svd on the residual space
+  # q = 2
+  svd_R <- svd(R)
   if (q == 1) {
-    U_q <- as.matrix(svd(R)$u[, seq(q)]) 
+    U_q <- as.matrix(svd_R$u[, 1]) 
+    Psi_hat <- rbind(svd_R$d[1] %*% t(svd_R$v)[1, ])
   } else {
-    U_q <- svd(R)$u[, seq(q)]
+    U_q <- svd_R$u[, seq(q)]
+    Psi_hat <- diag(svd_R$d[seq(q)]) %*% t(svd_R$v)[seq(q), ]
   }
   
   ## step 3: estimate the surrogate variable
-  Psi_hat <- t(U_q) %*% Y 
+  # Psi_hat <- t(U_q) %*% R
   M_jn <- matrix(1/n, n, n)
   D_jn <- diag(1, n) - M_jn
   
+  ## TODO: see Seunggeung's code to simplify this (you can reduce some computation)
   if (q == 1) {
     C <- 1/(Psi_hat %*% D_jn %*% t(Psi_hat))
     if (C[1, 1] < 1e-15) message("q_hat = 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is smaller than 1e-15.")
@@ -51,7 +56,7 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
     Sigma_C <- svd_C$d
     V_C <- svd_C$v
     C_inv <- svd_C$u %*% diag(1/Sigma_C) %*% t(svd_C$v)
-    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% svd_C$v
+    Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% C_inv
   }
 
   ## step 4: fitting the model again with the surrogate variable (this time using PNNLS)
