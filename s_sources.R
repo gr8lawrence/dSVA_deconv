@@ -13,3 +13,7 @@ library(paran)
 library(sva)
 library(DescTools)
 library(microbenchmark)
+
+## other benchmark methods
+library(limma)
+library(RUVSeq)

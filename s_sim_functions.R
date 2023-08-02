@@ -17,9 +17,10 @@ get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
 }
 
 ## TODO: simulate when q = 2, 3, 4 (1 discrete + 1 continuous, 1 discrete + 2 continuous, 2 discrete + 2 continuous)
+## TODO: simulate continuous functions only when q = 1.
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, small_effect = FALSE) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small"), p_w2 = 0.5) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -53,11 +54,14 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   ## choose half of the 0, 1 group to be up regulated
   
   ## encode the latent effects of the binary groups directly instead of using Z * D
-  if (small_effect) {
+  if (first_effect == "small") {
     Y_lat <- get_Y_lat_small_effects(m, n, chi_df, gamma, W)
-  } else {
+  } else if (first_effect == "bin") {
     Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma, W)
+  } else if (first_effect == "con") {
+    Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, p_w2)
   }
+  
   if (q >= 2) {
     Y_lat2 <- matrix(0, nrow = m, ncol = n)
     W2 <- extraDistr::rbern(m, 0.5)
@@ -141,3 +145,11 @@ get_Y_lat_small_effects <- function(m, n, chi_df, gamma, W) {
   Y_lat
 }
 
+get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, p_w2 = 0.5) {
+  Y_lat2 <- matrix(0, nrow = m, ncol = n)
+  W2 <- extraDistr::rbern(m, p_w2)
+  for (i in 1:n) {
+    Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * D[2, i]
+  }
+  Y_lat2
+}

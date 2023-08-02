@@ -14,8 +14,13 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
   }
   
   # if no hidden factor is estimated, return the P_hat from the simplified model
+  # if (q == 0) {
+  #   message("Use PA to estimate the number of hidden factors (under development).")
+  # }
   if (q == 0) {
-    message("Use PA to estimate the number of hidden factors (under development).")
+    message("Specifying q = 0.")
+    P_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, sum = 1)$x})
+    return(P_hat)
   }
   
   ## step 1: obtain the canonical model residual (using linear regression here instead of PNNLS)
@@ -65,7 +70,7 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
   P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
 
   ## return the P_hat
-  P_hat
+  return(P_hat)
 }
 
 

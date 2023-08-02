@@ -13,6 +13,32 @@ Theta <- true_data$X
 X <- model.matrix(~1 + Theta)
 var(c(true_data$Y_lat))/var(c(true_data$Y - true_data$Y_lat)) # the variance of Y_lat cannot dominate!!
 
+## use RUV to obtain a cleaner solution
+## TODO: check how to re-assemble the Y after removing batch effects
+# ctl <- rep(TRUE, m)
+# m1 <- ceiling(m/4)
+# m2 <- floor(m/4)
+# ctl[c(seq(m1), seq(m - m2 + 1, m))] <- FALSE
+# fit <- ruv::RUV4(Y = log10(t(Y)), X = matrix(1, n, 1), Z = NULL, eta = NULL, ctl = ctl, k = q, include.intercept = FALSE)
+# Y_rm <- t(exp(log10(t(Y)) - fit$W %*% fit$alpha))
+
+
+## use LIMMA - log-space removal and then exponential
+## examples
+# y <- matrix(rnorm(10*9),10,9)
+# y[,1:3] <- y[,1:3] + 5
+# batch <- c("A","A","A","B","B","B","C","C","C")
+# y2 <- removeBatchEffect(y, batch)
+# par(mfrow=c(1,2))
+# boxplot(as.data.frame(y),main="Original")
+# boxplot(as.data.frame(y2),main="Batch corrected")
+
+## Our example
+log_Y <- log(Y)
+batch <- true_data$D[1, ]
+log_Y2 <- limma::removeBatchEffect(x = log_Y, batch = batch)
+Y2 <- exp(log_Y2)
+
 ## solve a LS and get the residual
 svd_X <- svd(X)
 U_x <- svd_X$u
@@ -26,6 +52,7 @@ svd_R <- svd(R)
 svd_R$u
 
 # all.equal(R, svd_R$u %*% diag(svd_R$d) %*% t(svd_R$v)) 
+## Below is Seunggeung's code for dSVA
 dSVA <- function (Y, X, ncomp = 0) 
 {
   X1 <- model.matrix(~1 + X)
