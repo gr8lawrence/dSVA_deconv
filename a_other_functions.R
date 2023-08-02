@@ -59,16 +59,17 @@ RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
   # Y <- true_data$Y
   # Theta <- true_data$X
   
-  ## TODO: understand what control genes have to do with RUVr
   ## control genes are listed as those corresponding to hidden factor 1 unless otherwise provided
-  # if (is.null(ctl_gene)) {
-  #   m <- nrow(Y)
-  #   ctl <- rep(TRUE, m)
-  #   m1 <- ceiling(m/4)
-  #   m2 <- floor(m/4)
-  #   ctl[c(seq(m1), seq(m - m2 + 1, m))] <- FALSE
-  # }
-  # 
+  if (is.null(ctl_gene)) {
+    # m <- nrow(Y)
+    # ctl <- rep(TRUE, m)
+    # m1 <- ceiling(m/4)
+    # m2 <- floor(m/4)
+    # ctl[c(seq(m1), seq(m - m2 + 1, m))] <- FALSE
+    ## every gene is a control gene
+    ctl <- rep(TRUE, m)
+  }
+
   
   ## adjust for batch effects on the original expression
   if (intercept) {
@@ -87,29 +88,28 @@ RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
   R <- Y - X %*% B_star_hat
   
   ## adjust the original Y based on the residuals
-  # Y2 <- RUVSeq::RUVr(x = Y, cIdx = ctl, k = n_comp, residuals = R, ...)
+  Y2 <- RUVSeq::RUVr(x = Y, cIdx = ctl, k = n_comp, residuals = R, ...)
   
   ## use the described method in RUVr manuscript to finish the method
   ## perform an SVD on the residual
-  svd_R <- svd(R)
-  if (n_comp == 1) {
-    W_hat <- as.matrix(svd_R$u[, 1]) * svd_R$d[1]
-  } else {
-    W_hat <- svd_R$u[, seq(n_comp)] %*% diag(svd_R$d[seq(n_comp)])
-  }
+  # svd_R <- svd(R)
+  # if (n_comp == 1) {
+  #   W_hat <- as.matrix(svd_R$u[, 1]) * svd_R$d[1]
+  # } else {
+  #   W_hat <- svd_R$u[, seq(n_comp)] %*% diag(svd_R$d[seq(n_comp)])
+  # }
   
   ## create a new feature matrix
-  if (intercept) {
-    X_new <- model.matrix(~1 + cbind(W_hat, Theta))
-  } else {
-    X_new <- cbind(W_hat, Theta)
-  }
-  B_hat <- apply(Y_cen, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = 1)$x})
-  P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
+  # if (intercept) {
+  #   X_new <- model.matrix(~1 + cbind(W_hat, Theta))
+  # } else {
+  #   X_new <- cbind(W_hat, Theta)
+  # }
+  # B_hat <- apply(Y_cen, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = 1)$x})
+  # P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
   
   ## get P_hat on adjusted Y the using pnnls
-  # P_hat <- NNLS_ext(Y = Y, Theta = X_new, alg = "pnnls", intercept = TRUE, centralized_residual = FALSE)
-  # print("HERE")
+  P_hat <- NNLS_ext(Y = Y2$normalizedCounts, Theta = Theta, alg = "pnnls", intercept = TRUE, centralized_residual = FALSE)
   ## return P_hat
   return(P_hat)
 }

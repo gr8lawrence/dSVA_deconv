@@ -87,7 +87,7 @@ p3 <- ggplot(result_df_long %>% filter(metric == "mse"), aes(x = method, y = val
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 90))
 
 ## use ggplot to plot the results
-pdf("plots/benchmark_sim_q_2_new.pdf")
+pdf("plots/benchmark_sim_q_1_v3.pdf")
 print(p1)
 print(p2)
 print(p3)
