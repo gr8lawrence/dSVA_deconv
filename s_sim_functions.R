@@ -20,7 +20,7 @@ get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
 ## TODO: simulate continuous functions only when q = 1.
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small"), p_w2 = 0.5) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small", "flat", "me"), p_w2 = 0.5) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -32,11 +32,18 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
   
   ## generating the regression part and the latent variable part
-  Y_reg <- X %*% P_star
-  
+  if (first_effect != "me") {
+    Y_reg <- X %*% P_star
+  } else {
+    ME <- matrix(0, nrow = m, ncol = K)
+    for (i in 1:m) ME[i, ] <- rnorm(n = K, mean = 0, sd = sqrt(mean(X[i, ])/3))
+    Y_reg <- (X + ME) %*% P_star   
+  }
+ 
   ## generate the categorical and continuous latent variables in the D matrix
   # Z <- matrix(nrow = m, ncol = q)
-  D <- matrix(nrow = q, ncol = n)
+  D <- matrix(0, nrow = q, ncol = n)
+  # if (first_effect != "me") D[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
   D[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
   if (q >= 2) {
     ## add another continuous feature (purely positive)
@@ -60,6 +67,10 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
     Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma, W)
   } else if (first_effect == "con") {
     Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, p_w2)
+  } else if (first_effect == "flat") {
+    Y_lat <- get_Y_lat_flat(m, n, chi_df, gamma, W)
+  } else if (first_effect == "me") {
+    Y_lat = ME %*% P_star 
   }
   
   if (q >= 2) {
@@ -78,7 +89,11 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   # }
   
   ## generate the measurement error
-  Y <- Y_reg + Y_lat 
+  if (first_effect != "me") {
+    Y <- Y_reg + Y_lat
+  } else {
+    Y <- Y_reg
+  }
   
   if (err) {
     E <- matrix(0, nrow = m, ncol = n)
@@ -93,7 +108,6 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   ## get the proportion of Y being negative
   p_neg <- sum(Y < 0)/(m * n)
   Y[Y < 0] <- 0
-  
   
   ## gather the results into a list
   ls <- list(X = X,
@@ -152,4 +166,40 @@ get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, p_w2 = 0.5) {
     Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * D[2, i]
   }
   Y_lat2
+}
+
+## flat signals in the latent factor
+get_Y_lat_flat <- function(m, n, chi_df, gamma, W) {
+  Y_lat <- matrix(0, nrow = m, ncol = n)
+  for (i in 1:n) {
+    Y_lat[, i] <- W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))
+  }
+  Y_lat
+}
+
+get_sing_vals <- function(true_data, intercept = TRUE, n_sv = 10) {
+  ## see the distribution of top 10 eigenvalues for Y, Y_lat, R
+  Y <- true_data$Y
+  Y_lat <- true_data$Y_lat
+  
+  if (intercept) {
+    X <- model.matrix(~1 + true_data$X)
+  } else {
+    X <- true_data$X
+  }
+  
+  svd_X <- svd(X)
+  U_x <- svd_X$u
+  Sigma_x <- svd_X$d
+  V_x <- svd_X$v
+  B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+  R <- Y - X %*% B_star_hat
+  
+  d_Y <- svd(Y)$d[seq(n_sv)]
+  d_Y_lat <- svd(Y_lat)$d[seq(n_sv)]
+  d_R <- svd(Y_lat)$d[seq(n_sv)]
+  
+  mat <- rbind(d_Y, d_Y_lat, d_R)
+  colnames(mat) <- as.character(seq(n_sv))
+  mat
 }
