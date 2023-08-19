@@ -1,6 +1,7 @@
 ## update dSVA extension for this setting
 ## what if we assume we know q = 1
 ## allow an intercept
+
 dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
   n <- ncol(Y)
   m <- nrow(Y)

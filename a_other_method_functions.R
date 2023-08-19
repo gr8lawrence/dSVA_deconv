@@ -143,3 +143,4 @@ RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
   # if (intercept) P_hat <- P_hat[-1, ]
 # }
 
+

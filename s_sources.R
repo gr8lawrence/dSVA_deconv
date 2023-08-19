@@ -1,6 +1,7 @@
 source("a_dSVA_functions.R")
-source("a_other_functions.R")
+source("a_other_method_functions.R")
 source("s_sim_functions.R")
+source("s_util_functions.R")
 library(extraDistr)
 library(statmod)
 library(MASS)
