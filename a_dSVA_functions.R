@@ -2,7 +2,7 @@
 ## what if we assume we know q = 1
 ## allow an intercept
 
-dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
+dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE, test = FALSE) {
   n <- ncol(Y)
   m <- nrow(Y)
   q <- n_comp # rename n_comp to q
@@ -71,7 +71,13 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, intercept = TRUE) {
   P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
 
   ## return the P_hat
-  return(P_hat)
+  if (!test) {
+    return(P_hat)
+  } else {
+    Y_lat_hat <- Y - Theta %*% P_hat
+    return(list(P_hat = P_hat,
+                Y_lat_hat = Y_lat_hat))
+  }
 }
 
 

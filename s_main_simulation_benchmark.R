@@ -7,14 +7,15 @@ set.seed(100)
 n <- 20
 m <- 1000
 K <- 5
-q <- 1
+q <- 2
 err <- TRUE
 p_sig <- c(0.25, 0.5, 0.75)
 lambda <- 5
 # gamma <- 3
 gamma_seq <- c(1/4, 1/2, 1, 2, 4)
 n_sv <- 6 # the number of sv we want to plot
-first_effect <- "me"
+first_effect <- "miss"
+second_effect <- "bin"
 B <- 100
 
 ## parameters for debugging
@@ -47,7 +48,7 @@ for (p in p_sig) {
       
       ## create a list to hold all the estimated proportions
       P_hat_ls <- list()
-      true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect)
+      true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect, second_effect = second_effect)
       
       ## dSVA
       P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
@@ -75,11 +76,11 @@ for (p in p_sig) {
       ccc_ls <- lapply(P_hat_ls, my_ccc, P2 = true_data$P_star)
       
       ## mean squared errors
-      mse_ls <- lapply(P_hat_ls, my_mse, P2 = true_data$P_star)
+      mae_ls <- lapply(P_hat_ls, my_mae, P2 = true_data$P_star)
       
       ## organize the results
-      res_mat <- cbind(rbind(unlist(cor_ls), unlist(ccc_ls), unlist(mse_ls)), p, gamma)
-      rownames(res_mat) <- c("cor", "ccc", "mse")
+      res_mat <- cbind(rbind(unlist(cor_ls), unlist(ccc_ls), unlist(mae_ls)), p, gamma)
+      rownames(res_mat) <- c("cor", "ccc", "mae")
       result_matrix <- rbind(result_matrix, res_mat)
       
       ## for recording the distribution of eigenvalues
@@ -109,14 +110,18 @@ p2 <- ggplot(result_df_long %>% filter(metric == "ccc"), aes(x = method, y = val
   facet_grid(p ~ gamma) +
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 90))
 
-p3 <- ggplot(result_df_long %>% filter(metric == "mse"), aes(x = method, y = value, fill = method)) +
+p3 <- ggplot(result_df_long %>% filter(metric == "mae"), aes(x = method, y = value, fill = method)) +
   geom_boxplot() +
-  labs(title = paste("q =", q), x = "Method", y = "Mean squared error", caption = "Rows: p_sig; columns: gamma") +
+  labs(title = paste("q =", q), x = "Method", y = "Mean absolute error", caption = "Rows: p_sig; columns: gamma") +
   facet_grid(p ~ gamma) +
   theme(legend.position = "bottom", axis.text.x = element_text(angle = 90))
 
 ## use ggplot to plot the results
-pdf("plots/benchmark_sim_q_1_v4_me.pdf")
+if (q == 1) {
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_v5.pdf"))
+} else if (q == 2) {
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_v5.pdf"))
+}
 print(p1)
 print(p2)
 print(p3)
@@ -154,7 +159,12 @@ sv_p4 <- ggplot(sv_long %>% filter(type == "fitted residuals"), aes(x = rank, y 
   labs(title = "Sample-wise PCA on Fitted Residuals", x = "Rank", y = "log10(eigenvalue)") +
   theme(legend.position = "bottom")
 
-pdf("plots/benchmark_sim_sample_PCA_q_1_me.pdf")
+if (q == 1) {
+  pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, ".pdf"))
+} else if (q == 2) {
+  pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, "_", second_effect, ".pdf"))
+}
+
 print(sv_p1)
 print(sv_p2)
 print(sv_p3)
@@ -176,3 +186,11 @@ dev.off()
 # print(bi_ls$bi_Y_lat)
 # print(bi_ls$bi_R)
 # dev.off()
+
+## let's test out some PCA functions
+# A = matrix(1:12, 3, 4)
+# M_j = matrix(1/3, 3, 3)
+# A_cent = (diag(1, 3, 3) - M_j) %*% A
+# 
+# prcomp(A)
+# prcomp(A_cent) # same eigenvalues

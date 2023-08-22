@@ -18,3 +18,6 @@ library(microbenchmark)
 ## other benchmark methods
 library(limma)
 library(RUVSeq)
+
+## heatmap package
+library(ComplexHeatmap)

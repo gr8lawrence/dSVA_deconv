@@ -6,10 +6,20 @@ my_ccc <- function(P1, P2) {
   mean(ccc)
 }
 my_mse <- function(P1, P2) mean((P1 - P2)^2)
+my_mae <- function(P1, P2) mean(abs(P1 - P2))
 
 get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
   X <- matrix(NA_real_, nrow = m, ncol = K)
   W <- extraDistr::rbern(m, p_sig)
+  D_exp <- diag(rchisq(n = m, df = chi_df)) # mean expression value of each gene
+  for (i in 1:m) X[i, ] <- sample(W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K)))
+  X <- D_exp %*% X
+  list(X = X, W = W)
+}
+
+## simulate a second set of signatures using the marker genes from gene_signatures
+get_second_signatures <- function(m, n, K, W, p_sig = 0.5, lambda = 3, chi_df = 200) {
+  X <- matrix(NA_real_, nrow = m, ncol = K)
   D_exp <- diag(rchisq(n = m, df = chi_df)) # mean expression value of each gene
   for (i in 1:m) X[i, ] <- sample(W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K)))
   X <- D_exp %*% X
@@ -32,7 +42,7 @@ get_signatures_bx <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200, d 
 ## TODO: simulate continuous functions only when q = 1.
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small", "flat", "me"), p_w2 = 0.5) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small", "flat", "cc", "miss"), second_effect = c("con", "bin"), p_w2 = 0.5) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -41,57 +51,78 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   
   ## generate proportions
   P_star <- matrix(nrow = K, ncol = n)
-  for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
   
   ## generating the regression part and the latent variable part
-  if (first_effect != "me") {
+  if (first_effect != "cc") {
+    for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
     Y_reg <- X %*% P_star
   } else {
-    ME <- matrix(0, nrow = m, ncol = K)
-    for (i in 1:m) ME[i, ] <- rnorm(n = K, mean = 0, sd = sqrt(mean(X[i, ])/3))
-    Y_reg <- (X + ME) %*% P_star   
+    ## case-control!
+    ## making the same group assignment as the binary grouping case
+    Dmat <- matrix(0, nrow = q, ncol = n)
+    Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+    for (i in 1:floor(n/2)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
+    for (i in seq(floor(n/2) + 1, n)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = c(rep(1, K - 1), 3))
+    
+    ## if the second kind of cell type exhibite different profiles based on a binary assignment
+    sig_ls2 <- get_second_signatures(m, n, K, W, p_sig, 2 * lambda, chi_df/2)
+    X2 <- sig_ls2$X
+    Y <- cbind(X %*% P_star[, Dmat[1, ] == 0], X2 %*% P_star[, Dmat[1, ] == 1])
   }
  
   ## generate the categorical and continuous latent variables in the D matrix
   # Z <- matrix(nrow = m, ncol = q)
-  D <- matrix(0, nrow = q, ncol = n)
-  # if (first_effect != "me") D[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
-  D[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  if (first_effect != "cc") Dmat <- matrix(0, nrow = q, ncol = n)
+  if (first_effect != "cc" & first_effect != "con") Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  if (first_effect == "con") Dmat[1, ] <- rchisq(n, df = 30)
   if (q >= 2) {
     ## add another continuous feature (purely positive)
-    D[2, ] <- rchisq(n = n, df = 30)
-    # D[2, ] <- abs(rnorm(n = n, mean = 5, sd = 1))
+    if (second_effect == "con") {
+      Dmat[2, ] <- rchisq(n = n, df = 30)
+    } else if (second_effect == "bin") {
+      Dmat[2, ] <- rep(c(rep(0, floor(n/4)), rep(1, floor(n/4))), 2)
+    }
+    # Dmat[2, ] <- abs(rnorm(n = n, mean = 5, sd = 1))
   }  
   if (q >= 3) {
     ## add another continuous feature (could be negative)
-    # D[3, ] <- 
+    # Dmat[3, ] <- 
   }
   if (q == 4) {
     ## add another discrete feature
-    # D[4, ] <- 
+    # Dmat[4, ] <- 
   }
   ## choose half of the 0, 1 group to be up regulated
   
-  ## encode the latent effects of the binary groups directly instead of using Z * D
+  ## encode the latent effects of the binary groups directly instead of using Z * Dmat
   if (first_effect == "small") {
     Y_lat <- get_Y_lat_small_effects(m, n, chi_df, gamma, W)
   } else if (first_effect == "bin") {
     Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma, W)
   } else if (first_effect == "con") {
-    Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, p_w2)
+    Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, Dmat[1, ], p_w2)
   } else if (first_effect == "flat") {
     Y_lat <- get_Y_lat_flat(m, n, chi_df, gamma, W)
-  } else if (first_effect == "me") {
-    Y_lat = ME %*% P_star 
+  } else if (first_effect == "cc") {
+    Y_reg <- X %*% P_star 
+    Y_lat <- Y - Y_reg 
+  } else if (first_effect == "miss") {
+    Y <- create_miss(Y_reg, Dmat[1, ])
+    Y_lat <- Y - Y_reg
   }
-  
+
+  ## get the second latent effect
   if (q >= 2) {
     Y_lat2 <- matrix(0, nrow = m, ncol = n)
-    W2 <- extraDistr::rbern(m, 0.5)
-    for (i in 1:n) {
-      # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/4) + (1 - W) * rchisq(m, df = chi_df/4)) * D[2, i]
-      # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * D[2, i]
-      Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * D[2, i]
+    if (second_effect == "con") {
+      W2 <- extraDistr::rbern(m, 0.5)
+      for (i in 1:n) {
+        # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/4) + (1 - W) * rchisq(m, df = chi_df/4)) * Dmat[2, i]
+        # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * Dmat[2, i]
+        Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * Dmat[2, i]
+      }
+    } else if (second_effect == "bin") {
+       Y_lat2 <- get_Y_lat_binary2(m, n, chi_df, gamma, Dmat[2, ], W)
     }
     Y_lat <- Y_lat + Y_lat2
   }
@@ -101,11 +132,9 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   # }
   
   ## generate the measurement error
-  if (first_effect != "me") {
+  if (first_effect != "cc") {
     Y <- Y_reg + Y_lat
-  } else {
-    Y <- Y_reg
-  }
+  } 
   
   if (err) {
     E <- matrix(0, nrow = m, ncol = n)
@@ -125,7 +154,7 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   ls <- list(X = X,
              # Z = Z, # Z is not important!
              P_star = P_star,
-             D = D,
+             D = Dmat,
              Y = Y,
              E = E,
              Y_lat = Y_lat,
@@ -134,16 +163,17 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   return(ls)
 }
 
+## first binary effect
 get_Y_lat_binary <- function(m, n, chi_df, gamma, W) {
   Y_lat <- matrix(0, m, n)
   
-  ## for the group where D = 0, select m/4 genes that increase in expression
+  ## for the group where Dmat = 0, select m/4 genes that increase in expression
   m1 <- ceiling(m/4)
   n1 <- floor(n/2)
   W1 <- W[seq(m1)]
   Y_lat[seq(m1), seq(n1)] <- W1 * rchisq(n = m1 * n1, df = gamma * chi_df) + (1 - W1) * rchisq(n = m1 * n1, df = chi_df)
   
-  ## for the group where D = 1, do the same
+  ## for the group where Dmat = 1, do the same
   m2 <- floor(m/4)
   n2 <- ceiling(n/2)
   W2 <- W[seq(m - m2 + 1, m)]
@@ -153,16 +183,36 @@ get_Y_lat_binary <- function(m, n, chi_df, gamma, W) {
   Y_lat
 }
 
+## second binary effect
+get_Y_lat_binary2 <- function(m, n, chi_df, gamma, d, W) {
+  Y_lat <- matrix(0, m, n)
+  
+  ## for the group where d = 0, select m/4 genes that increase in expression
+  m1 <- ceiling(m/4)
+  n1 <- sum(d == 0)
+  W1 <- W[seq(m1 + 1, ceiling(m/2))]
+  Y_lat[seq(m1 + 1, ceiling(m/2)), (d == 0)] <- W1 * rchisq(n = m1 * n1, df = gamma * chi_df) + (1 - W1) * rchisq(n = m1 * n1, df = chi_df)
+  
+  ## for the group where d = 1, do the same
+  m2 <- floor(m/4)
+  n2 <- sum(d == 1)
+  W2 <- W[seq(ceiling(m/2) + 1, ceiling(m/2) + m2)]
+  Y_lat[seq(ceiling(m/2) + 1, ceiling(m/2) + m2), (d == 1)] <- W2 * rchisq(n = m2 * n2, df = gamma * chi_df) + (1 - W2) * rchisq(n = m2 * n2, df = chi_df)
+  
+  ## return Y_lat
+  Y_lat
+}
+
 get_Y_lat_small_effects <- function(m, n, chi_df, gamma, W) {
   Y_lat <- matrix(0, m, n)
   
-  ## for the group where D = 0, select m/4 genes that increase in expression
+  ## for the group where Dmat = 0, select m/4 genes that increase in expression
   m1 <- ceiling(m/4)
   n1 <- floor(n/2)
   W1 <- W[seq(m1)]
   Y_lat[seq(m1), seq(n1)] <- W1 * rnorm(n = m1 * n1, mean = gamma * chi_df, sd = sqrt(chi_df/3)) + (1 - W1) * rnorm(n = m1 * n1, mean = chi_df, sd = sqrt(chi_df/3))
   
-  ## for the group where D = 1, do the same
+  ## for the group where Dmat = 1, do the same
   m2 <- floor(m/4)
   n2 <- ceiling(n/2)
   W2 <- W[seq(m - m2 + 1, m)]
@@ -172,11 +222,12 @@ get_Y_lat_small_effects <- function(m, n, chi_df, gamma, W) {
   Y_lat
 }
 
-get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, p_w2 = 0.5) {
+get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, d, p_w2 = 0.5) {
   Y_lat2 <- matrix(0, nrow = m, ncol = n)
   W2 <- extraDistr::rbern(m, p_w2)
   for (i in 1:n) {
-    Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * D[2, i]
+    # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/8, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
+    Y_lat2[, i] <- W2 * (W * gamma * runif(m, -1, 1) + (1 - W) * runif(m, -1, 1)) * d[i]
   }
   Y_lat2
 }
@@ -188,6 +239,14 @@ get_Y_lat_flat <- function(m, n, chi_df, gamma, W) {
     Y_lat[, i] <- W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))
   }
   Y_lat
+}
+
+## create missing
+create_miss <- function(Y_reg, d) {
+  m <- nrow(Y_reg)
+  Y_reg[seq(ceiling(m/4)), (d == 0)] <- 0 # mark missing = 0
+  Y_reg[seq(m - floor(m/4) + 1, m), (d == 1)] <- 0 # mark missing = 0
+  Y_reg
 }
 
 # get_sing_vals <- function(true_data, intercept = TRUE, n_sv = 10) {
