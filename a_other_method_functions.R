@@ -143,4 +143,33 @@ RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
   # if (intercept) P_hat <- P_hat[-1, ]
 # }
 
+## if when the true data is known
+get_p_known <- function(true_data, first_effect, intercept = FALSE) {
+  if (intercept) {
+    ## adding an intercept also makes the known method better
+    X <- model.matrix(~1 + true_data$X)
+    if (first_effect == "cc") {
+      X3 <- true_data$X + true_data$X2
+      X2 <- model.matrix(~1 + X3)
+    } 
+  } else {
+    X <- true_data$X
+    if (first_effect == "cc") X2 <- true_data$X + true_data$X2
+  }
+  if (first_effect == "cc") {
+    ## recovering the true proportions under separate gene signatures for the cc structure
+    P <- cbind(
+      apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x}),
+      apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+    )
+  } else {
+    ## for the rest
+    P <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+  }
+  if (intercept) {
+    return(P[-1, ])
+  } else {
+    return(P)
+  }
+}
 

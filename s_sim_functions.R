@@ -1,4 +1,5 @@
 ## This file contains all the official simulation functions
+## performance metrics
 my_cor <- function(P1, P2) mean(diag(cor(P1, P2)))
 my_ccc <- function(P1, P2) {
   ccc <- vector(mode = "double", length = ncol(P1))
@@ -8,6 +9,19 @@ my_ccc <- function(P1, P2) {
 my_mse <- function(P1, P2) mean((P1 - P2)^2)
 my_mae <- function(P1, P2) mean(abs(P1 - P2))
 
+## the functions for the case-control scenario
+disturb <- function(alpha) {
+  K <- length(alpha)
+  alpha2 <- vector(mode = "double", length = K)
+  alpha2[seq(K - 1)] <- alpha[seq(K - 1)] + runif(K - 1, 0, mean(alpha)/(K - 1))
+  alpha2[K] <- alpha[K] - runif(1, 0, mean(alpha))
+  alpha2
+}
+
+softmax <- function(x) exp(x)/sum(exp(x))
+row_center <- function(X) t(apply(X, 1, function(x) x - mean(x)))
+
+## get Theta (from project 2)
 get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
   X <- matrix(NA_real_, nrow = m, ncol = K)
   W <- extraDistr::rbern(m, p_sig)
@@ -18,7 +32,7 @@ get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
 }
 
 ## simulate a second set of signatures using the marker genes from gene_signatures
-get_second_signatures <- function(m, n, K, W, p_sig = 0.5, lambda = 3, chi_df = 200) {
+get_second_signatures <- function(m, n, K, W, lambda = 3, chi_df = 200) {
   X <- matrix(NA_real_, nrow = m, ncol = K)
   D_exp <- diag(rchisq(n = m, df = chi_df)) # mean expression value of each gene
   for (i in 1:m) X[i, ] <- sample(W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K)))
@@ -42,7 +56,9 @@ get_signatures_bx <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200, d 
 ## TODO: simulate continuous functions only when q = 1.
 ## allow errors (err = TRUE)
 ## build a new model with an intercept
-dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, first_effect = c("bin", "con", "small", "flat", "cc", "miss"), second_effect = c("con", "bin"), p_w2 = 0.5) {
+dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, 
+                                     first_effect = c("bin", "con", "small", "flat", "cc", "miss"), second_effect = c("con", "bin"), 
+                                     p_w2 = 0.5, p_pert = 0.5) {
   
   ## generate signature matrices
   sig_ls <- get_signatures(m, n, K, p_sig, lambda, chi_df)
@@ -54,35 +70,43 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   
   ## generating the regression part and the latent variable part
   if (first_effect != "cc") {
-    for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
+    ## if in a case_control structrue: half of the samples are affected by a different CT abundances and a different GEP
+    P_star <- t(extraDistr::rdirichlet(n = n, alpha = rep(1, K)))
+    # for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
     Y_reg <- X %*% P_star
   } else {
     ## case-control!
+    ## use the improved case-control structure in 2023/09
     ## making the same group assignment as the binary grouping case
-    Dmat <- matrix(0, nrow = q, ncol = n)
-    Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
-    for (i in 1:floor(n/2)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
-    for (i in seq(floor(n/2) + 1, n)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = c(rep(1, K - 1), 3))
+    Alpha <- Alpha2 <- t(extraDistr::rdirichlet(n, 1:K))
+    Alpha2[, seq(n/2 + 1, n)] <- apply(Alpha2[, seq(n/2 + 1, n)], 2, disturb)
+    P_star <- apply(Alpha, 2, softmax)
+    P1 <- apply(Alpha2, 2, softmax)
+    # Dmat <- P1 - P_star
+    Dmat <- matrix(c(rep(0, floor(n/2)), rep(1, ceiling(n/2))), nrow = q, ncol = n)
+    # P_star[,  Dmat[1, ] == 0] <- t(extraDistr::rdirichlet(n = floor(n/2), alpha = rep(1, K)))
+    # P_star[,  Dmat[1, ] == 1] <- t(extraDistr::rdirichlet(n = ceiling(n/2), alpha = K * 2^seq(K)/sum(2^seq(K))))
+    # for (i in 1:floor(n/2)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
+    # for (i in seq(floor(n/2) + 1, n)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = K * 2^seq(K)/sum(2^seq(K)))
     
     ## if the second kind of cell type exhibite different profiles based on a binary assignment
-    sig_ls2 <- get_second_signatures(m, n, K, W, p_sig, 2 * lambda, chi_df/2)
-    X2 <- sig_ls2$X
-    Y <- cbind(X %*% P_star[, Dmat[1, ] == 0], X2 %*% P_star[, Dmat[1, ] == 1])
+    sig_ls2 <- get_second_signatures(m, n, K, W, 2 * lambda, 2 * chi_df)
+    X2 <- extraDistr::rbern(m, p_pert) * sig_ls2$X # only a subset of genes are perturbed 
+    Y <- cbind(X %*% P_star[, Dmat[1, ] == 0], (X + X2) %*% P1[, Dmat[1, ] == 1])
   }
  
   ## generate the categorical and continuous latent variables in the D matrix
   # Z <- matrix(nrow = m, ncol = q)
   if (first_effect != "cc") Dmat <- matrix(0, nrow = q, ncol = n)
-  if (first_effect != "cc" & first_effect != "con") Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
-  if (first_effect == "con") Dmat[1, ] <- rchisq(n, df = 30)
+  if (first_effect == "bin" | first_effect == "miss") Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  if (first_effect == "con") Dmat[1, ] <- rchisq(n, df = chi_df/K)
   if (q >= 2) {
     ## add another continuous feature (purely positive)
     if (second_effect == "con") {
-      Dmat[2, ] <- rchisq(n = n, df = 30)
+      Dmat[2, ] <- rchisq(n, df = chi_df/K)
     } else if (second_effect == "bin") {
       Dmat[2, ] <- rep(c(rep(0, floor(n/4)), rep(1, floor(n/4))), 2)
     }
-    # Dmat[2, ] <- abs(rnorm(n = n, mean = 5, sd = 1))
   }  
   if (q >= 3) {
     ## add another continuous feature (could be negative)
@@ -98,14 +122,14 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   if (first_effect == "small") {
     Y_lat <- get_Y_lat_small_effects(m, n, chi_df, gamma, W)
   } else if (first_effect == "bin") {
-    Y_lat <- get_Y_lat_binary(m, n, chi_df, gamma, W)
+    Y_lat <- get_Y_lat_binary(m, n, chi_df/2, gamma, W)
   } else if (first_effect == "con") {
     Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, Dmat[1, ], p_w2)
   } else if (first_effect == "flat") {
     Y_lat <- get_Y_lat_flat(m, n, chi_df, gamma, W)
   } else if (first_effect == "cc") {
     Y_reg <- X %*% P_star 
-    Y_lat <- Y - Y_reg 
+    Y_lat <- X2 %*% (P1 - P_star) 
   } else if (first_effect == "miss") {
     Y <- create_miss(Y_reg, Dmat[1, ])
     Y_lat <- Y - Y_reg
@@ -122,7 +146,7 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
         Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * Dmat[2, i]
       }
     } else if (second_effect == "bin") {
-       Y_lat2 <- get_Y_lat_binary2(m, n, chi_df, gamma, Dmat[2, ], W)
+       Y_lat2 <- get_Y_lat_binary2(m, n, chi_df/2, gamma, Dmat[2, ], W)
     }
     Y_lat <- Y_lat + Y_lat2
   }
@@ -151,15 +175,29 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   Y[Y < 0] <- 0
   
   ## gather the results into a list
-  ls <- list(X = X,
-             # Z = Z, # Z is not important!
-             P_star = P_star,
-             D = Dmat,
-             Y = Y,
-             E = E,
-             Y_lat = Y_lat,
-             W = W,
-             p_neg = p_neg)
+  if (first_effect == "cc") {
+    ls <- list(X = X,
+               # Z = Z, # Z is not important!
+               X2 = X2,
+               P_star = P_star,
+               P1 = P1,
+               D = Dmat,
+               Y = Y,
+               E = E,
+               Y_lat = Y_lat,
+               W = W,
+               p_neg = p_neg)
+  } else {
+    ls <- list(X = X,
+               # Z = Z, # Z is not important!
+               P_star = P_star,
+               D = Dmat,
+               Y = Y,
+               E = E,
+               Y_lat = Y_lat,
+               W = W,
+               p_neg = p_neg)
+  }
   return(ls)
 }
 
@@ -227,7 +265,9 @@ get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, d, p_w2 = 0.5) {
   W2 <- extraDistr::rbern(m, p_w2)
   for (i in 1:n) {
     # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/8, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
-    Y_lat2[, i] <- W2 * (W * gamma * runif(m, -1, 1) + (1 - W) * runif(m, -1, 1)) * d[i]
+    # Y_lat2[, i] <- W2 * (W * gamma * runif(m, -1, 1) + (1 - W) * runif(m, -1, 1)) * d[i]
+    # Y_lat2[, i] <- W2 * (W * gamma + (1 - W)) * d[i] # the most naive model
+    Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
   }
   Y_lat2
 }
@@ -240,7 +280,7 @@ get_Y_lat_flat <- function(m, n, chi_df, gamma, W) {
   }
   Y_lat
 }
-
+ 
 ## create missing
 create_miss <- function(Y_reg, d) {
   m <- nrow(Y_reg)
@@ -482,28 +522,28 @@ get_Y_bz <- function(m, n, K, p_sig = 0.5, chi_df = 200, d = 0.15, err = TRUE) {
 
 ## getting the number of latent factors
 ## TODO: finish this function
-estimate_q <- function(Y, X, intercept = TRUE) {
-  Y <- true_data$Y
-  X <- true_data$X1
-  
-  if (intercept) {
-    X <- model.matrix(~1 + X)
-  } else {
-    X <- true_data$X
-  }
-  
-  ## get the residuals
-  svd_X <- svd(X)
-  U_x <- svd_X$u
-  Sigma_x <- svd_X$d
-  V_x <- svd_X$v
-  B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
-  R <- Y - X %*% B_star_hat
-  
-  ## get the sequence of PCAs
-  d_R <- log10(prcomp(t(R))$sdev^2)
-  
-  mat <- rbind(d_Y[seq(n_sv)], d_Y_lat[seq(n_sv)], d_R[seq(n_sv)])
-  colnames(mat) <- as.character(seq(n_sv))
-  mat
-}
+# estimate_q <- function(Y, X, intercept = TRUE) {
+#   Y <- true_data$Y
+#   X <- true_data$X1
+#   
+#   if (intercept) {
+#     X <- model.matrix(~1 + X)
+#   } else {
+#     X <- true_data$X
+#   }
+#   
+#   ## get the residuals
+#   svd_X <- svd(X)
+#   U_x <- svd_X$u
+#   Sigma_x <- svd_X$d
+#   V_x <- svd_X$v
+#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+#   R <- Y - X %*% B_star_hat
+#   
+#   ## get the sequence of PCAs
+#   d_R <- log10(prcomp(t(R))$sdev^2)
+#   
+#   mat <- rbind(d_Y[seq(n_sv)], d_Y_lat[seq(n_sv)], d_R[seq(n_sv)])
+#   colnames(mat) <- as.character(seq(n_sv))
+#   mat
+# }

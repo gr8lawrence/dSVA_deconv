@@ -27,3 +27,19 @@
 # # colnames(mat) <- c("r", "a1", "a2")
 # lm1 <- lm(r ~ a[, 1:2] - 1)
 # all.equal(coef(lm1), p1[1:2])
+
+
+## this section checks what happens for continuous confounding
+Y <- true_data$Y
+Y_true <- true_data$X %*% true_data$P_star + true_data$E 
+all.equal(Y - Y_true, true_data$Y_lat) # passed
+X <- model.matrix(~ 1 + true_data$X)
+P_known <- apply(Y_true, 2, function(y) {lsei::pnnls(a = X, b = y , sum = 1)$x})
+P_pnnls <- NNLS_ext(Y = Y, Theta = true_data$X, alg = "pnnls", centralized_residual = FALSE)
+R_known <- Y - X %*% P_known
+R_pnnls <- Y - X %*% P_pnnls
+
+mean(R_known)
+mean(R_pnnls)
+
+

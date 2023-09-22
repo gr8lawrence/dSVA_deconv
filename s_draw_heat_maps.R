@@ -5,14 +5,14 @@ set.seed(100)
 n <- 20
 m <- 1000
 K <- 5
-q <- 2
+q <- 1
 err <- TRUE
 p_sig <- c(0.25, 0.5, 0.75)
 lambda <- 5
 # gamma <- 3
 gamma_seq <- c(1/4, 1, 4)
 # n_sv <- 6 # the number of sv we want to plot
-first_effect <- "miss"
+first_effect <- "con"
 second_effect <- "bin"
 B <- 100
 

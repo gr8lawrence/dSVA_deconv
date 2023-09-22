@@ -2,7 +2,7 @@
 source("s_sources.R")
 set.seed(100)
 
-## TODO: write code for recording specific singular value distributions of true latent factors and residuals for q = 1 and q = 2.
+## TODO: run simulations using the estimate_n_comp *once* for every set of experiments
 ## set the parameters
 n <- 20
 m <- 1000
@@ -14,9 +14,11 @@ lambda <- 5
 # gamma <- 3
 gamma_seq <- c(1/4, 1/2, 1, 2, 4)
 n_sv <- 6 # the number of sv we want to plot
-first_effect <- "miss"
-second_effect <- "bin"
+first_effect <- "con"
+second_effect <- "con"
+# B <- 100
 B <- 100
+plot_sv <- FALSE # whether to plot the singular/eigenvalues
 
 ## parameters for debugging
 # p_sig <- 0.75
@@ -31,27 +33,33 @@ B <- 100
 # bi_Y_lat_ls <- list()
 # bi_R_ls <- list()
 
-result_matrix <- matrix(ncol = 8)
-sv_results <- tibble(gamma = NaN, p = NaN, rank = NA, d_Y = NaN, d_Y_lat = NaN, d_R = NaN)
+result_matrix <- matrix(ncol = 9)
+if (plot_sv) sv_results <- tibble(gamma = NaN, p = NaN, rank = NA, d_Y = NaN, d_Y_lat = NaN, d_R = NaN)
 ## simulation functions
 for (p in p_sig) {
   for (gamma in gamma_seq) {
-    # p = 0.25
-    # gamma = 1/4
+     # p = 0.25
+     # gamma = 1/4
     for (b in 1:B) {
-      # if (b == 1) {
-      #   bi_ls <- get_bi_plot(true_data = true_data)
-      #   bi_ls$bi_Y + labs(title = "Y")
-      #   print(bi_ls$bi_Y_lat + labs(title = "Latent Factors"))
-      #   print(bi_ls$bi_R + labs(title = "Fitted Residuals"))
-      # }
-      
       ## create a list to hold all the estimated proportions
       P_hat_ls <- list()
       true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect, second_effect = second_effect)
       
-      ## dSVA
-      P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
+      ## estimate n_comp once for each setting
+      if (b == 1) dSVA_n_comp <- estimate_n_comp(true_data$Y, true_data$X)
+      
+      ## dSVA + PNNLS
+      # P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
+      P_hat_ls$dSVA_pnnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "pnnls") # using the estimated components
+      
+      ## dSVA + NNLS
+      P_hat_ls$dSVA_nnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "nnls") 
+      
+      ## PNNLS (sum-to-one NNLS)
+      P_hat_ls$pnnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "pnnls", centralized_residual = FALSE)
+      
+      ## NNLS
+      P_hat_ls$nnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "nnls", centralized_residual = FALSE)
       
       ## limma + PNNLS
       P_hat_ls$limma_pnnls <- limma_ext(Y = true_data$Y, Theta = true_data$X, batch = true_data$D[1, ])
@@ -59,16 +67,18 @@ for (p in p_sig) {
       ## RUVr + PNNLS
       P_hat_ls$RUVr_pnnls <- RUVr_ext(Y = true_data$Y, Theta = true_data$X, n_comp = q)
       
-      ## NNLS
-      P_hat_ls$nnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "nnls", 
-                                centralized_residual = FALSE)
-      ## constrained NNLS
-      P_hat_ls$pnnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "pnnls", 
-                                 centralized_residual = FALSE)
-      
-      ## if we know both X and Z
-      P_hat_ls$known <- apply(true_data$Y - true_data$Y_lat, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
-      
+      ## if we know the underlying truths
+      P_hat_ls$known <- get_p_known(true_data, first_effect, TRUE)
+       
+      # if (first_effect == "cc") {
+      #   P_hat_ls$known <- cbind(
+      #     apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x}),
+      #     apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = true_data$X + true_data$X2, b = y , sum = 1)$x})
+      #   )
+      # } else {
+      #   P_hat_ls$known <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
+      # }
+
       ## mean sample-wise correlations
       cor_ls <- lapply(P_hat_ls, my_cor, P2 = true_data$P_star)
       
@@ -84,20 +94,22 @@ for (p in p_sig) {
       result_matrix <- rbind(result_matrix, res_mat)
       
       ## for recording the distribution of eigenvalues
-      mat <- get_sing_vals(true_data = true_data, n_sv = n_sv)
-      mat2 <- cbind(gamma, p, 1:n_sv, t(mat))
-      colnames(mat2) <- colnames(sv_results)
-      sv_results <- rbind(sv_results, mat2)
+      if (plot_sv) {
+        mat <- get_sing_vals(true_data = true_data, n_sv = n_sv)
+        mat2 <- cbind(gamma, p, 1:n_sv, t(mat))
+        colnames(mat2) <- colnames(sv_results)
+        sv_results <- rbind(sv_results, mat2)
+      }
     }
   }
 }
 result_matrix <- result_matrix[-1, ]
 result_df <- as_tibble(result_matrix, rownames = "metric")
 result_df_long <- pivot_longer(result_df,
-                               c("dSVA", "limma_pnnls", "RUVr_pnnls", "nnls", "pnnls", "known"),
+                               c("dSVA_pnnls", "dSVA_nnls", "pnnls", "nnls", "limma_pnnls", "RUVr_pnnls", "known"),
                                names_to = "method",
                                values_to = "value")
-result_df_long$method <- factor(result_df_long$method, levels = c("dSVA", "limma_pnnls", "RUVr_pnnls", "nnls", "pnnls", "known"))
+result_df_long$method <- factor(result_df_long$method, levels = c("dSVA_pnnls", "dSVA_nnls", "pnnls", "nnls", "limma_pnnls", "RUVr_pnnls", "known"))
 p1 <- ggplot(result_df_long %>% filter(metric == "cor"), aes(x = method, y = value, fill = method)) +
   geom_boxplot() +
   labs(title = paste("q =", q), x = "Method", y = "Pearson's correlation", caption = "Rows: p_sig; columns: gamma") +
@@ -118,58 +130,60 @@ p3 <- ggplot(result_df_long %>% filter(metric == "mae"), aes(x = method, y = val
 
 ## use ggplot to plot the results
 if (q == 1) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_v5.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20230913.pdf"))
 } else if (q == 2) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_v5.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20230912.pdf"))
 }
 print(p1)
 print(p2)
 print(p3)
 dev.off()
 
-## now plot the sv_s
-sv_results <- sv_results[-1, ]
-sv_results$rank <- factor(sv_results$rank, levels = as.character(1:n_sv))
-sv_long <- pivot_longer(sv_results, cols = 4:6, names_to = "type", values_to = "sv")
-sv_long$type <- factor(sv_long$type, 
-                       levels = c("d_Y", "d_Y_lat", "d_R"),
-                       labels = c("bulk (true + latent)", "latent", "fitted residuals"))
-
-sv_p1 <- ggplot(sv_long, aes(x = rank, y = log10(sv), color = type)) +
-  geom_boxplot() +
-  facet_grid(p ~ gamma) +
-  labs(title = paste("q =", q), x = "Rank", y = "log10(eigenvalue)") +
-  theme(legend.position = "bottom")
-
-sv_p2 <- ggplot(sv_long %>% filter(type == "bulk (true + latent)"), aes(x = rank, y = log10(sv))) +
-  geom_boxplot() +
-  facet_grid(p ~ gamma) +
-  labs(title = "Sample-wise PCA on Y", x = "Rank", y = "log10(eigenvalue)") +
-  theme(legend.position = "bottom")
-
-sv_p3 <- ggplot(sv_long %>% filter(type == "latent"), aes(x = rank, y = log10(sv))) +
-  geom_boxplot() +
-  facet_grid(p ~ gamma) +
-  labs(title = "Sample-wise PCA on Latent Factors", x = "Rank", y = "log10(eigenvalue)") +
-  theme(legend.position = "bottom")
-
-sv_p4 <- ggplot(sv_long %>% filter(type == "fitted residuals"), aes(x = rank, y = log10(sv))) +
-  geom_boxplot() +
-  facet_grid(p ~ gamma) +
-  labs(title = "Sample-wise PCA on Fitted Residuals", x = "Rank", y = "log10(eigenvalue)") +
-  theme(legend.position = "bottom")
-
-if (q == 1) {
-  pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, ".pdf"))
-} else if (q == 2) {
-  pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, "_", second_effect, ".pdf"))
+if (plot_sv) {
+  ## now plot the sv_s
+  sv_results <- sv_results[-1, ]
+  sv_results$rank <- factor(sv_results$rank, levels = as.character(1:n_sv))
+  sv_long <- pivot_longer(sv_results, cols = 4:6, names_to = "type", values_to = "sv")
+  sv_long$type <- factor(sv_long$type,
+                         levels = c("d_Y", "d_Y_lat", "d_R"),
+                         labels = c("bulk (true + latent)", "latent", "fitted residuals"))
+  
+  sv_p1 <- ggplot(sv_long, aes(x = rank, y = log10(sv), color = type)) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = paste("q =", q), x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p2 <- ggplot(sv_long %>% filter(type == "bulk (true + latent)"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Y", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p3 <- ggplot(sv_long %>% filter(type == "latent"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Latent Factors", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p4 <- ggplot(sv_long %>% filter(type == "fitted residuals"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Fitted Residuals", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  if (q == 1) {
+    pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, ".pdf"))
+  } else if (q == 2) {
+    pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, "_", second_effect, ".pdf"))
+  }
+  
+  print(sv_p1)
+  print(sv_p2)
+  print(sv_p3)
+  print(sv_p4)
+  dev.off()
 }
-
-print(sv_p1)
-print(sv_p2)
-print(sv_p3)
-print(sv_p4)
-dev.off()
 
 # svd(Y)$d[1]/sum(svd(Y)$d)
 # (svd(Y)$d[1])^2/sum(svd(Y)$d^2)
