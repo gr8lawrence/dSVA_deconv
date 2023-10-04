@@ -12,8 +12,8 @@ lambda <- 5
 # gamma <- 3
 gamma_seq <- c(1/4, 1, 4)
 # n_sv <- 6 # the number of sv we want to plot
-first_effect <- "con"
-second_effect <- "bin"
+first_effect <- "bin"
+second_effect <- "con"
 B <- 100
 
 if (q == 1) {
@@ -25,7 +25,9 @@ if (q == 1) {
 } else if (q == 2) {
   effect_name <- case_when(first_effect == "bin" & second_effect == "bin" ~ "Binary + Binary Structure",
                            first_effect == "bin" & second_effect == "con" ~ "Binary Structure + Continuous Confounding",
-                           first_effect == "con" & second_effect == "con" ~ "Continuous + Continuous Confounding")
+                           first_effect == "con" & second_effect == "con" ~ "Continuous + Continuous Confounding",
+                           first_effect == "cc" & second_effect == "bin" ~ "Case/control + Binary Structure",
+                           first_effect == "cc" & second_effect == "con" ~ "Case/control + Continuous Structure")
 }
 
 
@@ -37,9 +39,12 @@ ht_opt(heatmap_column_names_gp = gpar(fontface = "italic"),
 )
 
 if (q == 1) {
-  pdf(paste0("plots/matrix_heatmap_", first_effect, ".pdf"))
+  # pdf(paste0("plots/matrix_heatmap_", first_effect, ".pdf"))
+  pdf(paste0("plots/matrix_heatmap_", first_effect, "_20230923.pdf"))
+  
 } else if (q == 2) {
-  pdf(paste0("plots/matrix_heatmap_q", q, "_", first_effect, "_", second_effect, ".pdf"))
+  # pdf(paste0("plots/matrix_heatmap_q", q, "_", first_effect, "_", second_effect, ".pdf"))
+  pdf(paste0("plots/matrix_heatmap_q", q, "_", first_effect, "_", second_effect, "_20230923.pdf"))
 }
 for (p in p_sig) {
   for (gamma in gamma_seq) {
@@ -56,7 +61,8 @@ for (p in p_sig) {
     ## put them into the same list
     H_both <- H_Y + H_Y_lat
     draw(H_both, 
-         column_title = paste0(effect_name, ", gamma=", gamma, ", p_sig=", p), 
+         # column_title = paste0(effect_name, ", gamma=", gamma, ", p_sig=", p), 
+         column_title = paste0(effect_name, " (q = ", q, ") example"), 
          column_title_gp = gpar(fontsize = 16))
   }
 }

@@ -40,6 +40,8 @@ NNLS_ext <- function(Y, Theta, alg = c("nnls", "pnnls"), intercept = TRUE, centr
   P_hat
 }
 
+# sol <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "pnnls")
+
 ## limma-extended (for one batch, blind to the )
 limma_ext <- function(Y, Theta, batch, intercept = TRUE, ...) {
   ## adjust for batch effects on the log-expression
@@ -172,4 +174,49 @@ get_p_known <- function(true_data, first_effect, intercept = FALSE) {
     return(P)
   }
 }
+
+## use CVXR to re-build a lsei solver for NNLS and pNNLS
+# k_no: the number of components not NN-restricted 
+# input one column of Y (y) at a time
+cvxr_NNLS_ext <- function(y, X, k_no, alg = c("nnls", "pnnls"), solver = "ECOS", parallel = FALSE) {
+  
+  ## define the variables
+  b <- CVXR::Variable(rows = ncol(X))
+  obj <- CVXR::Minimize(0.5 * sum((y - X %*% b)^2))
+  prob <- CVXR::Problem(objective = obj)
+  
+  ## define constraints
+  if (alg == "pnnls") {
+    ## can solve using ECOS
+    E <- diag(c(rep(0, k_no), rep(1, ncol(X) - k_no))) 
+    F <- matrix(c(rep(0, k_no), rep(1, ncol(X) - k_no)), nrow = 1)  
+    cons <- list(-E %*% b <= 0, F %*% b == 1)
+
+  } else if (alg == "nnls") {
+    ## can solve using ECOS or OSQP
+    E <- diag(c(rep(0, k_no), rep(1, ncol(X) - k_no))) 
+    cons <- list(-E %*% b <= 0)
+  }
+  
+  CVXR::constraints(prob) <- cons
+  sol <- CVXR::solve(prob, solver = solver, parallel = parallel)
+  p_hat <- sol$getValue(b)[-seq(k_no)]
+  # print(sol$getValue(b))
+  
+  ## normalize to satisfy sum-to-one if NNLS
+  if (alg == "nnls") p_hat <- p_hat/sum(p_hat)
+  
+  p_hat
+}
+
+## compare methods
+# X <- model.matrix(~ 1 + true_data$X)
+# sol_cvxr <- cvxr_NNLS_ext(y = true_data$Y[, 1], X = X, k_no = 0, alg = "pnnls", solver = "ECOS")
+# sol_lsei <- lsei::pnnls(a = X, b = true_data$Y[, 1], k = ncol(X) - ncol(true_data$X), sum = 1)
+# 
+# sol_lsei$x  - sol_cvxr
+# 
+# sol_cvxr <- cvxr_NNLS_ext(y = true_data$Y[, 1], X = X, k_no = 0, alg = "nnls", solver = "ECOS")
+# sol_lsei <- lsei::pnnls(a = X, b = true_data$Y[, 1], k = ncol(X) - ncol(true_data$X), sum = NULL)
+# sol_lsei$x  - sol_cvxr
 

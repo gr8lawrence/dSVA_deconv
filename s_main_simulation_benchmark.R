@@ -7,14 +7,14 @@ set.seed(100)
 n <- 20
 m <- 1000
 K <- 5
-q <- 2
+q <- 1
 err <- TRUE
 p_sig <- c(0.25, 0.5, 0.75)
 lambda <- 5
 # gamma <- 3
 gamma_seq <- c(1/4, 1/2, 1, 2, 4)
 n_sv <- 6 # the number of sv we want to plot
-first_effect <- "con"
+first_effect <- "cc"
 second_effect <- "con"
 # B <- 100
 B <- 100
@@ -50,10 +50,10 @@ for (p in p_sig) {
       
       ## dSVA + PNNLS
       # P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
-      P_hat_ls$dSVA_pnnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "pnnls") # using the estimated components
+      P_hat_ls$dSVA_pnnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "pnnls", solver = "lsei") # using the estimated components
       
       ## dSVA + NNLS
-      P_hat_ls$dSVA_nnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "nnls") 
+      P_hat_ls$dSVA_nnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "nnls", solver = "lsei") 
       
       ## PNNLS (sum-to-one NNLS)
       P_hat_ls$pnnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "pnnls", centralized_residual = FALSE)
@@ -130,9 +130,9 @@ p3 <- ggplot(result_df_long %>% filter(metric == "mae"), aes(x = method, y = val
 
 ## use ggplot to plot the results
 if (q == 1) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20230913.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20231003.pdf"))
 } else if (q == 2) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20230912.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20231003.pdf"))
 }
 print(p1)
 print(p2)
