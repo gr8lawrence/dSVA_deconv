@@ -46,7 +46,7 @@ for (p in p_sig) {
       true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect, second_effect = second_effect)
       
       ## estimate n_comp once for each setting
-      if (b == 1) dSVA_n_comp <- estimate_n_comp(true_data$Y, true_data$X)
+      if (b == 1) dSVA_n_comp <- estimate_n_comp(Y = rue_data$Y, Theta = true_data$X, method = "cutoff")
       
       ## dSVA + PNNLS
       # P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
