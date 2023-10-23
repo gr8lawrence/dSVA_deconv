@@ -22,31 +22,22 @@ softmax <- function(x) exp(x)/sum(exp(x))
 row_center <- function(X) t(apply(X, 1, function(x) x - mean(x)))
 
 ## get Theta (from project 2)
-## add a rotation matrix to record the rotation
 get_signatures <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200) {
-  X <- rho <- matrix(NA_real_, nrow = m, ncol = K)
+  X <- matrix(NA_real_, nrow = m, ncol = K)
   W <- extraDistr::rbern(m, p_sig)
   D_exp <- diag(rchisq(n = m, df = chi_df)) # mean expression value of each gene
-  for (i in 1:m) {
-    expr <- W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K))
-    names(expr) <- as.character(1:K)
-    X[i, ] <- expr_rot <- sample(expr)
-    rho[i, ] <- as.integer(names(expr_rot))
-  }
+  for (i in 1:m) X[i, ] <- sample(W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K)))
   X <- D_exp %*% X
-  list(X = X, W = W, rho = rho)
+  list(X = X, W = W)
 }
 
 ## simulate a second set of signatures using the marker genes from gene_signatures
-get_second_signatures <- function(m, n, K, W, rho, lambda = 3, chi_df = 200) {
-  X2 <- matrix(NA_real_, nrow = m, ncol = K)
+get_second_signatures <- function(m, n, K, W, lambda = 3, chi_df = 200) {
+  X <- matrix(NA_real_, nrow = m, ncol = K)
   D_exp <- diag(rchisq(n = m, df = chi_df)) # mean expression value of each gene
-  for (i in 1:m) {
-    expr2 <- W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K))
-    X2[i, ] <- expr2[rho[i, ]]
-  }
-  X2 <- D_exp %*% X2
-  list(X = X2, W = W)
+  for (i in 1:m) X[i, ] <- sample(W[i] * extraDistr::rdirichlet(1, c(lambda, rep(1, K - 1))) + (1 - W[i]) * extraDistr::rdirichlet(1, rep(1, K)))
+  X <- D_exp %*% X
+  list(X = X, W = W)
 }
 
 ## TODO: this is generating signature matrix with measurement errors
@@ -61,9 +52,12 @@ get_signatures_bx <- function(m, n, K, p_sig = 0.5, lambda = 3, chi_df = 200, d 
   list(X1 = X1, X = X, W = W)
 }
 
+## TODO: simulate when q = 2, 3, 4 (1 discrete + 1 continuous, 1 discrete + 2 continuous, 2 discrete + 2 continuous)
+## TODO: simulate continuous functions only when q = 1.
+## allow errors (err = TRUE)
 ## build a new model with an intercept
 dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, gamma = 2, chi_df = 200, err = FALSE, 
-                                     first_effect = c("bin", "con", "small", "cc"), second_effect = c("con", "bin"), 
+                                     first_effect = c("bin", "con", "small", "flat", "cc", "miss"), second_effect = c("con", "bin"), 
                                      p_w2 = 0.5, p_pert = 0.5) {
   
   ## generate signature matrices
@@ -74,33 +68,38 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
   ## generate proportions
   P_star <- matrix(nrow = K, ncol = n)
   
-  ## generating the true regression part 
+  ## generating the regression part and the latent variable part
   if (first_effect != "cc") {
-    
+    ## if in a case_control structrue: half of the samples are affected by a different CT abundances and a different GEP
     P_star <- t(extraDistr::rdirichlet(n = n, alpha = rep(1, K)))
+    # for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
     Y_reg <- X %*% P_star
-    
   } else {
-    
-    ## case-control: the latent structure is nested with the regression part
+    ## case-control!
+    ## use the improved case-control structure in 2023/09
+    ## making the same group assignment as the binary grouping case
     Alpha <- Alpha2 <- t(extraDistr::rdirichlet(n, 1:K))
     Alpha2[, seq(n/2 + 1, n)] <- apply(Alpha2[, seq(n/2 + 1, n)], 2, disturb)
     P_star <- apply(Alpha, 2, softmax)
     P1 <- apply(Alpha2, 2, softmax)
+    # Dmat <- P1 - P_star
     Dmat <- matrix(c(rep(0, floor(n/2)), rep(1, ceiling(n/2))), nrow = q, ncol = n)
-
+    # P_star[,  Dmat[1, ] == 0] <- t(extraDistr::rdirichlet(n = floor(n/2), alpha = rep(1, K)))
+    # P_star[,  Dmat[1, ] == 1] <- t(extraDistr::rdirichlet(n = ceiling(n/2), alpha = K * 2^seq(K)/sum(2^seq(K))))
+    # for (i in 1:floor(n/2)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
+    # for (i in seq(floor(n/2) + 1, n)) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = K * 2^seq(K)/sum(2^seq(K)))
+    
     ## if the second kind of cell type exhibite different profiles based on a binary assignment
-    rho <- sig_ls$rho
-    sig_ls2 <- get_second_signatures(m, n, K, W, rho, 2 * lambda, 2 * chi_df)
+    sig_ls2 <- get_second_signatures(m, n, K, W, 2 * lambda, 2 * chi_df)
     X2 <- extraDistr::rbern(m, p_pert) * sig_ls2$X # only a subset of genes are perturbed 
     Y <- cbind(X %*% P_star[, Dmat[1, ] == 0], (X + X2) %*% P1[, Dmat[1, ] == 1])
   }
  
-  ## generate the latent structures
+  ## generate the categorical and continuous latent variables in the D matrix
+  # Z <- matrix(nrow = m, ncol = q)
   if (first_effect != "cc") Dmat <- matrix(0, nrow = q, ncol = n)
-  if (first_effect == "bin") Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  if (first_effect == "bin" | first_effect == "miss") Dmat[1, ] <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
   if (first_effect == "con") Dmat[1, ] <- rchisq(n, df = chi_df/K)
-  
   if (q >= 2) {
     ## add another continuous feature (purely positive)
     if (second_effect == "con") {
@@ -109,6 +108,15 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
       Dmat[2, ] <- rep(c(rep(0, floor(n/4)), rep(1, floor(n/4))), 2)
     }
   }  
+  if (q >= 3) {
+    ## add another continuous feature (could be negative)
+    # Dmat[3, ] <- 
+  }
+  if (q == 4) {
+    ## add another discrete feature
+    # Dmat[4, ] <- 
+  }
+  ## choose half of the 0, 1 group to be up regulated
   
   ## encode the latent effects of the binary groups directly instead of using Z * Dmat
   if (first_effect == "small") {
@@ -117,17 +125,24 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
     Y_lat <- get_Y_lat_binary(m, n, chi_df/2, gamma, W)
   } else if (first_effect == "con") {
     Y_lat <- get_Y_lat_continuous(m, n, chi_df, gamma, W, Dmat[1, ], p_w2)
+  } else if (first_effect == "flat") {
+    Y_lat <- get_Y_lat_flat(m, n, chi_df, gamma, W)
   } else if (first_effect == "cc") {
     Y_reg <- X %*% P_star 
     Y_lat <- X2 %*% (P1 - P_star) 
-  } 
-  
+  } else if (first_effect == "miss") {
+    Y <- create_miss(Y_reg, Dmat[1, ])
+    Y_lat <- Y - Y_reg
+  }
+
   ## get the second latent effect
   if (q >= 2) {
     Y_lat2 <- matrix(0, nrow = m, ncol = n)
     if (second_effect == "con") {
       W2 <- extraDistr::rbern(m, 0.5)
       for (i in 1:n) {
+        # Y_lat2[, i] <- W2 * (W * rchisq(m, df = gamma * chi_df/4) + (1 - W) * rchisq(m, df = chi_df/4)) * Dmat[2, i]
+        # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df, sqrt(chi_df/3)) + (1 - W) * rnorm(m, chi_df, sqrt(chi_df/3))) * Dmat[2, i]
         Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * Dmat[2, i]
       }
     } else if (second_effect == "bin") {
@@ -135,6 +150,10 @@ dSVA_model_sim_intercept <- function(m, n, K, q = 1:4, p_sig = 0.5, lambda = 3, 
     }
     Y_lat <- Y_lat + Y_lat2
   }
+  # if (q >= 3) {
+  #   Y_lat3 <- matrix(0, nrow = m, ncol = n)
+  #   W3 <- extraDistr::rbern(m, 0.4)
+  # }
   
   ## generate the measurement error
   if (first_effect != "cc") {
@@ -244,28 +263,60 @@ get_Y_lat_small_effects <- function(m, n, chi_df, gamma, W) {
 get_Y_lat_continuous <- function(m, n, chi_df, gamma, W, d, p_w2 = 0.5) {
   Y_lat2 <- matrix(0, nrow = m, ncol = n)
   W2 <- extraDistr::rbern(m, p_w2)
-  for (i in 1:n) Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
+  for (i in 1:n) {
+    # Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/8, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
+    # Y_lat2[, i] <- W2 * (W * gamma * runif(m, -1, 1) + (1 - W) * runif(m, -1, 1)) * d[i]
+    # Y_lat2[, i] <- W2 * (W * gamma + (1 - W)) * d[i] # the most naive model
+    Y_lat2[, i] <- W2 * (W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))) * d[i]
+  }
   Y_lat2
 }
 
 ## flat signals in the latent factor
-# get_Y_lat_flat <- function(m, n, chi_df, gamma, W) {
-#   Y_lat <- matrix(0, nrow = m, ncol = n)
-#   for (i in 1:n) {
-#     Y_lat[, i] <- W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))
-#   }
-#   Y_lat
-# }
+get_Y_lat_flat <- function(m, n, chi_df, gamma, W) {
+  Y_lat <- matrix(0, nrow = m, ncol = n)
+  for (i in 1:n) {
+    Y_lat[, i] <- W * rnorm(m, gamma * chi_df/4, sqrt(gamma * chi_df/3)) + (1 - W) * rnorm(m, chi_df/4, sqrt(chi_df/3))
+  }
+  Y_lat
+}
  
 ## create missing
-# create_miss <- function(Y_reg, d) {
-#   m <- nrow(Y_reg)
-#   Y_reg[seq(ceiling(m/4)), (d == 0)] <- 0 # mark missing = 0
-#   Y_reg[seq(m - floor(m/4) + 1, m), (d == 1)] <- 0 # mark missing = 0
-#   Y_reg
+create_miss <- function(Y_reg, d) {
+  m <- nrow(Y_reg)
+  Y_reg[seq(ceiling(m/4)), (d == 0)] <- 0 # mark missing = 0
+  Y_reg[seq(m - floor(m/4) + 1, m), (d == 1)] <- 0 # mark missing = 0
+  Y_reg
+}
+
+# get_sing_vals <- function(true_data, intercept = TRUE, n_sv = 10) {
+#   ## see the distribution of top 10 eigenvalues for Y, Y_lat, R
+#   Y <- true_data$Y
+#   Y_lat <- true_data$Y_lat
+#   
+#   if (intercept) {
+#     X <- model.matrix(~1 + true_data$X)
+#   } else {
+#     X <- true_data$X
+#   }
+#   
+#   svd_X <- svd(X)
+#   U_x <- svd_X$u
+#   Sigma_x <- svd_X$d
+#   V_x <- svd_X$v
+#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+#   R <- Y - X %*% B_star_hat
+#   
+#   d_Y <- svd(Y)$d[seq(n_sv)]
+#   d_Y_lat <- svd(Y_lat)$d[seq(n_sv)]
+#   d_R <- svd(R)$d[seq(n_sv)]
+#   
+#   mat <- rbind(d_Y, d_Y_lat, d_R)
+#   colnames(mat) <- as.character(seq(n_sv))
+#   mat
 # }
 
-## get the singular values based on the sample-wise PCA
+## RE-WRITTEN to be of Sample-Wise PCA!!
 get_sing_vals <- function(true_data, intercept = TRUE, n_sv = 10) {
   ## see the distribution of top 10 eigenvalues for Y, Y_lat, R
   Y <- true_data$Y
@@ -294,34 +345,34 @@ get_sing_vals <- function(true_data, intercept = TRUE, n_sv = 10) {
 }
 
 ## For the Bingxin simulation
-# get_sing_vals2 <- function(true_data, intercept = TRUE, n_sv = 10) {
-#   ## see the distribution of top 10 eigenvalues for Y, Y_lat, R
-#   Y <- true_data$Y
-#   Y_lat <- true_data$Y_lat
-#   
-#   if (intercept) {
-#     X <- model.matrix(~1 + true_data$X)
-#   } else {
-#     X <- true_data$X
-#   }
-#   
-#   svd_X <- svd(X)
-#   U_x <- svd_X$u
-#   Sigma_x <- svd_X$d
-#   V_x <- svd_X$v
-#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
-#   R <- Y - X %*% B_star_hat
-#   
-#   d_Y <- prcomp(t(Y))$sdev^2
-#   d_Y_lat <- prcomp(t(Y_lat))$sdev^2
-#   d_R <- prcomp(t(R))$sdev^2
-#   
-#   mat <- rbind(d_Y[seq(n_sv)], d_Y_lat[seq(n_sv)], d_R[seq(n_sv)])
-#   colnames(mat) <- as.character(seq(n_sv))
-#   mat
-# }
+get_sing_vals2 <- function(true_data, intercept = TRUE, n_sv = 10) {
+  ## see the distribution of top 10 eigenvalues for Y, Y_lat, R
+  Y <- true_data$Y
+  Y_lat <- true_data$Y_lat
+  
+  if (intercept) {
+    X <- model.matrix(~1 + true_data$X)
+  } else {
+    X <- true_data$X
+  }
+  
+  svd_X <- svd(X)
+  U_x <- svd_X$u
+  Sigma_x <- svd_X$d
+  V_x <- svd_X$v
+  B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+  R <- Y - X %*% B_star_hat
+  
+  d_Y <- prcomp(t(Y))$sdev^2
+  d_Y_lat <- prcomp(t(Y_lat))$sdev^2
+  d_R <- prcomp(t(R))$sdev^2
+  
+  mat <- rbind(d_Y[seq(n_sv)], d_Y_lat[seq(n_sv)], d_R[seq(n_sv)])
+  colnames(mat) <- as.character(seq(n_sv))
+  mat
+}
 
-## a function to produce bi-plots based on PCA results
+## TODO: write a function to produce bi-plots based on PCA results
 get_bi_plot <- function(true_data, orient = c("gene", "sample"), intercept = TRUE) {
   ## extract Y and Y_lat
   Y <- true_data$Y
@@ -383,3 +434,116 @@ get_bi_plot <- function(true_data, orient = c("gene", "sample"), intercept = TRU
 
   rt_ls
 }
+
+## use the base R to get the biplot version
+# get_bi_plot <- function(true_data, intercept = TRUE) {
+#   ## extract Y and Y_lat
+#   Y <- true_data$Y
+#   Y_lat <- true_data$Y_lat
+#   
+#   ## calculate the OLS residuals
+#   if (intercept) {
+#     X <- model.matrix(~1 + true_data$X)
+#   } else {
+#     X <- true_data$X
+#   }
+#   svd_X <- svd(X)
+#   U_x <- svd_X$u
+#   Sigma_x <- svd_X$d
+#   V_x <- svd_X$v
+#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y
+#   R <- Y - X %*% B_star_hat
+#   
+#   ## name the matrices (or the biplot function would call an error)
+#   rownames(Y) <- rownames(Y_lat) <- rownames(R) <- paste("gene", as.character(1:m))
+#   colnames(Y) <- colnames(Y_lat) <- colnames(R) <- paste("sample", as.character(1:n)) 
+#   
+#   ## metadata
+#   # md <- matrix(as.factor(true_data$D), n, 1)
+#   # rownames(md) <- colnames(Y)
+#   
+#   ## get the svd objects
+#   pca_Y <- prcomp(t(Y))
+#   pca_Y_lat <- prcomp(t(Y_lat))
+#   pca_R <- prcomp(t(R))
+#   
+#   ## plot the biplots
+#   rt_ls <- list(bi_Y = stats::biplot(pca_Y),
+#                 bi_Y_lat = stats::biplot(pca_Y_lat),
+#                 bi_R = stats::biplot(pca_R))
+#   
+#   rt_ls
+# }
+
+## TODO: write funcitons that will perform simulations stipulated by BZ
+## In this, we do not need the latent factors
+get_Y_bz <- function(m, n, K, p_sig = 0.5, chi_df = 200, d = 0.15, err = TRUE) {
+  ## generate signature matrices
+  sig_ls <- get_signatures_bx(m, n, K, p_sig, lambda, chi_df, d)
+  X <- sig_ls$X
+  W <- sig_ls$W
+  X1 <- sig_ls$X1
+  
+  ## generate proportions
+  P_star <- matrix(nrow = K, ncol = n)
+  for (i in 1:n) P_star[, i] <- extraDistr::rdirichlet(n = 1, alpha = rep(1, K))
+  
+  ## obtain the true Y
+  Y <- X %*% P_star  
+  
+  ## getting the errors
+  if (err) {
+    E <- matrix(0, nrow = m, ncol = n)
+    for (i in 1:m) {
+      E[i, ] <- rnorm(n, mean(Y_reg[i, ]), sqrt(mean(Y_reg[i, ])/5))
+    }
+    Y <- Y + E
+  } else {
+    E <- NA
+  }
+  
+  ## get the proportion of Y being negative
+  p_neg <- sum(Y < 0)/(m * n)
+  Y[Y < 0] <- 0
+  
+  ## create a list of returned values
+  ls <- list(X = X,
+             X1 = X1, # the wrong signature matrix
+             # Z = Z, # Z is not important!
+             P_star = P_star,
+             D = NA,
+             Y = Y,
+             E = E,
+             Y_lat = NA,
+             W = W,
+             p_neg = p_neg)
+  return(ls)
+}
+
+## getting the number of latent factors
+## TODO: finish this function
+# estimate_q <- function(Y, X, intercept = TRUE) {
+#   Y <- true_data$Y
+#   X <- true_data$X1
+#   
+#   if (intercept) {
+#     X <- model.matrix(~1 + X)
+#   } else {
+#     X <- true_data$X
+#   }
+#   
+#   ## get the residuals
+#   svd_X <- svd(X)
+#   U_x <- svd_X$u
+#   Sigma_x <- svd_X$d
+#   V_x <- svd_X$v
+#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+#   R <- Y - X %*% B_star_hat
+#   
+#   ## get the sequence of PCAs
+#   d_R <- log10(prcomp(t(R))$sdev^2)
+#   
+#   mat <- rbind(d_Y[seq(n_sv)], d_Y_lat[seq(n_sv)], d_R[seq(n_sv)])
+#   colnames(mat) <- as.character(seq(n_sv))
+#   mat
+# }

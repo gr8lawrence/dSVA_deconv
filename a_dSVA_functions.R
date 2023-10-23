@@ -16,10 +16,6 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, alg = c("nnls", "pnnls"), interce
     X <- Theta
   }
   
-  # if no hidden factor is estimated, return the P_hat from the simplified model
-  # if (q == 0) {
-  #   message("Use PA to estimate the number of hidden factors (under development).")
-  # }
   if (n_comp == 0) {
     message("Specifying number of latent factors = 0.")
     if (solver == "lsei") {
@@ -41,11 +37,6 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, alg = c("nnls", "pnnls"), interce
   }
   
   ## step 1: obtain the canonical model residual (using linear regression here instead of PNNLS)
-  # svd_X <- svd(X)
-  # U_x <- svd_X$u
-  # Sigma_x <- svd_X$d
-  # V_x <- svd_X$v
-  # B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y  
   B_star_hat <- solve(t(X) %*% X) %*% t(X) %*% Y  
   R <- Y - X %*% B_star_hat
   
@@ -61,21 +52,16 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, alg = c("nnls", "pnnls"), interce
   }
   
   ## step 3: estimate the surrogate variable
-  # M_jn <- matrix(1/n, n, n)
-  # D_jn <- diag(1, n) - M_jn
-  # C2 <- Psi_hat %*% D_jn %*% t(Psi_hat)
   Psi_hat1 <- Psi_hat - apply(Psi_hat, 1, mean)
   C <- Psi_hat1 %*% t(Psi_hat1) 
   if (n_comp == 1) {
     if (1 / C[1, 1] < 1e-15) message("q_hat = 1 and the inverse of Psi_hat %*% D_jn %*% t(Psi_hat) is smaller than 1e-15.")
-    # Gamma_hat2 <- U_q + (X %*% B_star_hat %*% D_jn %*% t(Psi_hat)) / C[1, 1]
     Gamma_hat <- U_q + (X %*% B_star_hat %*% t(Psi_hat1)) / C[1, 1]
     
   } else {
     if (1 / kappa(C) < 1e-15) message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is close to singular, i.e. its reverse condition number < 1e-15.")
     svd_C <- svd(C)  # use svd to invert C to mitigate invertibility issues
     C_inv <- svd_C$u %*% diag(1/svd_C$d) %*% t(svd_C$v)
-    # Gamma_hat <- U_q + X %*% B_star_hat %*% D_jn %*% t(Psi_hat) %*% C_inv
     Gamma_hat <- U_q + X %*% B_star_hat %*% t(Psi_hat1) %*% C_inv
   }
 
@@ -137,7 +123,7 @@ estimate_n_comp_cutoff <- function(R = NULL, Y = NULL, Theta = NULL, intercept =
 }
 
 
-estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRUE, B = 19, seed = NULL, threshold = .05) {
+estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRUE, B = 49, seed = NULL, threshold = .05) {
   
   if (is.null(R)) {
     
@@ -176,17 +162,21 @@ estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRU
   }
   
   ## calculate cumulative p_values
-  pvals <- (nge + 1)/(B + 1)
+  p_vals <- (nge + 1)/(B + 1)
   
   ## find the significant cutoff
-  inds <- which(p_vals[-ncol(R)] < threshold)
-  n_comp <- inds[length(inds)]
+  n_comp <- 0
+  for (i in seq(1, ncol(R) - 1)) {
+    if (p_vals[i] < threshold) n_comp <- n_comp + 1 else break
+  }
+  # inds <- which(p_vals[-ncol(R)] < threshold)
+  # n_comp <- inds[length(inds)]
   
   n_comp
 }
 
 ## an upper-level function to include both methods
-estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B = 19, seed = NULL, intercept = TRUE, ...) {
+estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B = 49, seed = NULL, intercept = TRUE, ...) {
   
   if (method == "be") {
     n_comp <- estimate_n_comp_be(R = R, Y = Y, Theta = Theta, seed = seed, intercept = intercept, ...)

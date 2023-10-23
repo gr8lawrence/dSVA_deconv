@@ -2,7 +2,7 @@
 source("s_sources.R")
 set.seed(100)
 
-## TODO: run simulations using the estimate_n_comp *once* for every set of experiments
+## run simulations using the estimate_n_comp *once* for every set of experiments
 ## set the parameters
 n <- 20
 m <- 1000
@@ -15,9 +15,8 @@ lambda <- 5
 gamma_seq <- c(1/4, 1/2, 1, 2, 4)
 n_sv <- 6 # the number of sv we want to plot
 first_effect <- "cc"
-second_effect <- "con"
-# B <- 100
-B <- 100
+second_effect <- "bin"
+B <- 10
 plot_sv <- FALSE # whether to plot the singular/eigenvalues
 
 ## parameters for debugging
@@ -46,7 +45,7 @@ for (p in p_sig) {
       true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect, second_effect = second_effect)
       
       ## estimate n_comp once for each setting
-      if (b == 1) dSVA_n_comp <- estimate_n_comp(Y = rue_data$Y, Theta = true_data$X, method = "cutoff")
+      if (b == 1) dSVA_n_comp <- estimate_n_comp(Y = true_data$Y, Theta = true_data$X, method = "be", B = 49, seed = 100)
       
       ## dSVA + PNNLS
       # P_hat_ls$dSVA <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = ifelse(first_effect == "me", K - 1, q))
@@ -130,9 +129,9 @@ p3 <- ggplot(result_df_long %>% filter(metric == "mae"), aes(x = method, y = val
 
 ## use ggplot to plot the results
 if (q == 1) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20231003.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20231023_be.pdf"))
 } else if (q == 2) {
-  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20231003.pdf"))
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20231023_be.pdf"))
 }
 print(p1)
 print(p2)
