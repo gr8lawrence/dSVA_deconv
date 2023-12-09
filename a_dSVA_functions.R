@@ -115,7 +115,7 @@ estimate_n_comp_cutoff <- function(R = NULL, Y = NULL, Theta = NULL, intercept =
   } 
   
   ## use the gap of log singular values
-  d_R <- log(prcomp(t(R), scale = TRUE, center = TRUE)$sdev)
+  d_R <- log(prcomp(t(R), scale. = TRUE, center = TRUE)$sdev)
   d <- diff(-d_R, lag = 1)
   d <- d[-length(d)]
   n_comp <- which(d == max(d))
@@ -142,7 +142,7 @@ estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRU
   } 
   
   ## use the PA method by Buja & Eyuboglu (1992)
-  eigen0 <- prcomp(t(R), scale = TRUE, center = TRUE)$sdev # scaling for a fair comparison 
+  eigen0 <- prcomp(t(R), scale. = TRUE, center = TRUE)$sdev # scaling for a fair comparison 
   nge <- rep(0, length(eigen0)) # TODO: make a B x n matrix for paralleling
   
   if (!is.null(seed)) set.seed(seed)
@@ -176,6 +176,7 @@ estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRU
 }
 
 ## an upper-level function to include both methods
+## TODO: write the Tracy-widom test
 estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B = 49, seed = NULL, intercept = TRUE, ...) {
   
   if (method == "be") {
