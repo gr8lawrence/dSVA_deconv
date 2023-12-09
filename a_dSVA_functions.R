@@ -175,19 +175,52 @@ estimate_n_comp_be <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRU
   n_comp
 }
 
+
+## Tracy-Widom estimation
+estimate_n_comp_tw <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRUE, threshold = .01) {
+  
+  if (is.null(R)) {
+    
+    if (is.null(Y) | is.null(Theta)) stop("Y and Theta both need to be specified if R is not.")
+    
+    ## add an intercept 
+    if (intercept) {
+      X <- model.matrix(~1 + Theta)
+    } else {
+      X <- Theta
+    }
+    
+    ## perform first pass regression
+    Bhat <- solve(t(X) %*% X) %*% t(X) %*% Y  
+    R <- Y - X %*% Bhat
+  } 
+  
+  ## determine the Tracy-Widom threshold value
+  tw_theshold <- dplyr::case_when(threshold == 0.05 ~ 0.9793, 
+                                  threshold == 0.01 ~ 2.0234, 
+                                  threshold == 0.005 ~ 2.4224,
+                                  threshold == 0.001 ~ 3.2724)
+  
+  ## use the Tracy-Widom test by AssocTests
+  eigen0 <- prcomp(t(R), scale. = TRUE, center = TRUE)$sdev # scaling for a fair comparison 
+  tw_obj <- AssocTests::tw(eigen0, ncol(R), tw_theshold)
+  n_comp <- tw_obj$SigntEigenL
+  return(n_comp)
+}
+
 ## an upper-level function to include both methods
-## TODO: write the Tracy-widom test
 estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B = 49, seed = NULL, intercept = TRUE, ...) {
   
   if (method == "be") {
     n_comp <- estimate_n_comp_be(R = R, Y = Y, Theta = Theta, seed = seed, intercept = intercept, ...)
+  } else if (method == "tw") {
+    n_comp <- estimate_n_comp_tw(R = R, Y = Y, Theta = Theta, intercept = intercept, ...)
   } else if (method == "cutoff") {
     n_comp <- estimate_n_comp_cutoff(R = R, Y = Y, Theta = Theta, intercept = TRUE)
   } else {
     stop("Methods has to be either 'be' or 'cutoff'.")
   }
-  
-  n_comp
+  return(n_comp)
 }
   
 # estimate_n_comp(R = R, method = "be")
