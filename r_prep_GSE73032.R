@@ -71,6 +71,10 @@ sig_mat_common <- cbind(T_GEP, B_GEP, NK_GEP, Mono_GEP, Plasma_GEP, Neu_GEP)
 colnames(sig_mat_common) <- c("T", "B", "NK", "Mono", "Plasma", "Neu")
 saveRDS(sig_mat_common, "../dSVA_datasets/IRIS_sig_mat_all_genes.rds")
 
+
+# Bulk matrix after batch effect removals ---------------------------------
+
+
 ## extract the matrices and column data and subset them with the IRIS data
 ## get the count matrices and the column data
 bulk_raw <- readRDS("../dSVA_datasets/GSE73072_list_batchCorrect_unique.rds")
@@ -96,4 +100,31 @@ saveRDS(list(bulk_ls = bulk_common_ls,
              sig = sig_mat_common2,
              col_data = coldata_ls),
         "../dSVA_datasets/GSE73072_processed.rds")
+
+
+# Bulk matrices before batch effect removals ------------------------------
+
+bulk_raw_batch <- readRDS("../dSVA_datasets/GSE73072_list_unique.rds")
+matrix_ls_batch <- lapply(bulk_raw_batch, assay) # list of matrices
+coldata_ls_batch <- lapply(bulk_raw_batch, function(x) x @ colData) # list of column data
+# prod(rownames(bulk_raw[[1]] @ colData) == colnames(matrix_ls[[1]])) ## should be 1
+
+## get common genes
+# get_common_genes <- function(bulk_mat, sig_mat) {
+#   common_genes <- intersect(rownames(bulk_mat), rownames(sig_mat))
+# }
+
+# prod(rownames(matrix_ls_batch[[1]]) == rownames(matrix_ls_batch[[2]]))
+# prod(rownames(matrix_ls_batch[[1]]) == rownames(matrix_ls_batch[[3]]))
+# prod(rownames(matrix_ls_batch[[1]]) == rownames(matrix_ls_batch[[4]])) # should all be 1
+
+common_genes_batch <- intersect(rownames(matrix_ls_batch[[1]]), rownames(sig_mat_common))
+
+bulk_common_ls_batch <- lapply(matrix_ls_batch, function(x) x[common_genes_batch, ])
+sig_mat_common2_batch <- sig_mat_common[common_genes_batch, ]
+
+saveRDS(list(bulk_ls = bulk_common_ls_batch,
+             sig = sig_mat_common2_batch,
+             col_data = coldata_ls_batch),
+        "../dSVA_datasets/GSE73072_processed_batch.rds")
 
