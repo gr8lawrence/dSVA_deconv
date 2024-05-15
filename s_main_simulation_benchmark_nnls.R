@@ -1,0 +1,295 @@
+## source files and libraries
+source("s_sources.R")
+set.seed(100)
+
+## run simulations using the estimate_n_comp *once* for every set of experiments
+## set the parameters
+
+## command line arguments (q and first_effect)
+# cmd_args <- commandArgs(TRUE)
+# q <- as.numeric(cmd_args[1])
+# first_effect <- cmd_args[2]
+
+n <- 40
+m <- 2000
+K <- 10
+q <- 1
+err <- TRUE
+p_sig <- c(0.1, 0.25, 0.5)
+lambda <- 5
+gamma_seq <- c(1/4, 1/2, 1, 2, 4)
+n_sv <- 6 # the number of sv we want to plot
+first_effect <- "cc"
+second_effect <- "bin"
+B <- 3
+plot_sv <- FALSE # whether to plot the singular/eigenvalues
+mod <- NULL # ComBat covariate
+
+## set up a color palette
+my_palette <- c("#ffd380", "#ff8531", "#ff6361", "#bc5090", "#8a508f", "#2c4875")
+
+# my_palette <- c("#00202e", "#003f5c", "#2c4875", "#8a508f", "#bc5090",
+#                 "#ff6361", "#ff8531", "#ffa600", "#ffd380")
+
+## parameters for debugging
+# p = 0.25
+# gamma = 1/4
+# p_sig <- 0.75
+
+## partition the canvas
+# pdf("plots/simulation_with_continuous_latent_factor_q_1_diff_p.pdf")
+# par(mfrow = c(3, 1))
+
+## list to hold bi-plots
+# bi_Y_ls <- list()
+# bi_Y_lat_ls <- list()
+# bi_R_ls <- list()
+
+## make title
+if (q == 1) {
+  if (first_effect == "bin") {
+    title = "Binary D"
+  } else if (first_effect == "con") {
+    title = "Continuous D"
+  } else if (first_effect == "cc") {
+    title = "Case-control Structure"
+  }
+} else if (q == 2) {
+  if (first_effect == "bin" & second_effect == "bin") {
+    title = "Binary D"
+  } else if (first_effect == "con" & second_effect == "bin") {
+    title = "Continuous + Binary D"
+  } else if (first_effect == "con" & second_effect == "con") {
+    title = "Continuous D"
+  } else if (first_effect == "cc" & second_effect == "bin") {
+    title = "Case-control Structure + Binary D"
+  }
+}
+
+fig_title = paste0(title, " (q = ", q, ")")
+fig_subtitle = "NNLS Solver"
+
+## specify batches
+if (q == 1) {
+  if (first_effect == "con") {
+    batch <- NULL # defined later
+  } else {
+    batch <- c(rep(0, floor(n/2)), rep(1, ceiling(n/2)))
+  }
+} else if (q == 2) {
+  if (first_effect == "con") {
+    batch <- rep(c(rep(0, floor(n/4)), rep(1, ceiling(n/4))), 2)
+  } else {
+    batch <- c(rep(0, floor(n/4)), rep(1, ceiling(n/4)), rep(2, floor(n/4)), rep(3, ceiling(n/4)))
+  }
+}
+
+result_matrix <- matrix(ncol = 8) # ncol = 8 as of 01/19/2024
+if (plot_sv) sv_results <- tibble(gamma = NaN, p = NaN, rank = NA, d_Y = NaN, d_Y_lat = NaN, d_R = NaN)
+## simulation functions
+for (p in p_sig) {
+  for (gamma in gamma_seq) {
+    for (b in 1:B) {
+      ## create a list to hold all the estimated proportions
+      P_hat_ls <- list()
+      true_data <- dSVA_model_sim_intercept(m, n, K, q, p, lambda, gamma, err = err, first_effect = first_effect, second_effect = second_effect)
+      
+      if (q == 1 & first_effect == "con") batch <- as.numeric(true_data$D[1, ] <= median(true_data$D[1, ]))
+      
+      ## estimate n_comp once for each setting
+      if (b == 1) dSVA_n_comp <- estimate_n_comp(Y = true_data$Y, Theta = true_data$X, method = "be", B = 49, seed = 100)
+
+      ## dSVA + NNLS
+      P_hat_ls$dSVA_nnls <- dsva_for_sim(Y = true_data$Y, Theta = true_data$X, n_comp = dSVA_n_comp, alg = "nnls", solver = "lsei") 
+      
+      ## limma + NNLS
+      P_hat_ls$limma_nnls <- limma_ext(Y = true_data$Y, Theta = true_data$X, batch = batch, alg = "nnls")
+      
+      ## change the covariates if q = 2 and first_effect == con
+      # if (q == 2 & first_effect == "con") mod <- matrix(true_data$D[1, ], n, 1)
+      
+      ## ComBat + NNLS
+      P_hat_ls$ComBat_nnls <- combat_ext(Y = true_data$Y, Theta = true_data$X, batch = batch, combat_seq = FALSE, alg = "nnls", mod = mod)
+      
+      ## Combat_seq + NNLS
+      P_hat_ls$ComBat_seq_nnls <- combat_ext(Y = true_data$Y, Theta = true_data$X, batch = batch, combat_seq = TRUE, alg = "nnls", covar_mod = mod)
+
+      ## NNLS
+      P_hat_ls$nnls <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "nnls", centralized_residual = FALSE)
+      
+      ## if we know the underlying truths + NNLS
+      P_hat_ls$known <- get_p_known(true_data = true_data, first_effect = first_effect, intercept = TRUE, alg = "nnls")
+       
+      # if (first_effect == "cc") {
+      #   P_hat_ls$known <- cbind(
+      #     apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x}),
+      #     apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = true_data$X + true_data$X2, b = y , sum = 1)$x})
+      #   )
+      # } else {
+      #   P_hat_ls$known <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = true_data$X, b = y , sum = 1)$x})
+      # }
+
+      ## mean sample-wise correlations
+      cor_ls <- lapply(P_hat_ls, my_cor, P2 = true_data$P_star)
+      
+      ## mean CCC
+      ccc_ls <- lapply(P_hat_ls, my_ccc, P2 = true_data$P_star)
+      
+      ## mean squared errors
+      mae_ls <- lapply(P_hat_ls, my_mae, P2 = true_data$P_star)
+      
+      ## organize the results
+      res_mat <- cbind(rbind(unlist(cor_ls), unlist(ccc_ls), unlist(mae_ls)), p, gamma)
+      rownames(res_mat) <- c("cor", "ccc", "mae")
+      result_matrix <- rbind(result_matrix, res_mat)
+      
+      ## for recording the distribution of eigenvalues
+      if (plot_sv) {
+        mat <- get_sing_vals(true_data = true_data, n_sv = n_sv)
+        mat2 <- cbind(gamma, p, 1:n_sv, t(mat))
+        colnames(mat2) <- colnames(sv_results)
+        sv_results <- rbind(sv_results, mat2)
+      }
+    }
+  }
+}
+result_matrix <- result_matrix[-1, ]
+result_df <- as_tibble(result_matrix, rownames = "metric")
+result_df_long <- pivot_longer(result_df,
+                               c("dSVA_nnls", "limma_nnls", "ComBat_nnls", "ComBat_seq_nnls", "nnls", "known"),
+                               names_to = "method",
+                               values_to = "value")
+
+## labeling the results
+result_df_long$method <- factor(result_df_long$method, 
+                                levels = c("dSVA_nnls", "limma_nnls", "ComBat_nnls", "ComBat_seq_nnls", "nnls", "known"),
+                                labels = c("dSVA", "limma", "ComBat", "ComBat-seq", "No adjustment", "No latent effects"))
+                                # labels = c("dSVA + NNLS", "limma + NNLS", "ComBat + NNLS", "ComBat-seq + NNLS", "NNLS", "No confounding + NNLS"))
+result_df_long$p2 <- factor(result_df_long$p,
+                            levels = as.character(p_sig),
+                            labels = as.expression(parse(text = paste("p[sig]","==", p_sig, sep="")))
+)
+result_df_long$gamma2 <- factor(result_df_long$gamma,
+                                levels = as.character(gamma_seq),
+                                labels = as.expression(parse(text = paste("gamma","==", gamma_seq, sep="")))
+)
+p1 <- ggplot(result_df_long %>% filter(metric == "cor"), aes(x = method, y = value, fill = method)) +
+  geom_boxplot() +
+  labs(title = fig_title,
+       subtitle = fig_subtitle,
+       x = "Method", 
+       y = "Pearson's correlation") +
+  facet_grid(p2 ~ gamma2, labeller = label_parsed, scales = "free") +
+  # theme_linedraw(base_size = 12) +
+  theme_base(base_size = 12, base_family = "Times") +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        plot.background=element_blank()) +
+  scale_fill_manual(values = my_palette, name = "Method") 
+
+p2 <- ggplot(result_df_long %>% filter(metric == "ccc"), aes(x = method, y = value, fill = method)) +
+  geom_boxplot() +
+  labs(title = fig_title,
+       subtitle = fig_subtitle,
+       x = "Method", 
+       y = "Concordance correlation coefficient") +
+  facet_grid(p2 ~ gamma2, labeller = label_parsed, scales = "free") +
+  theme_base(base_size = 12, base_family = "Times") +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        plot.background=element_blank()) +
+  scale_fill_manual(values = my_palette)
+
+p3 <- ggplot(result_df_long %>% filter(metric == "mae"), aes(x = method, y = value, fill = method)) +
+  geom_boxplot() +
+  labs(title = fig_title, 
+       subtitle = fig_subtitle,
+       x = "Method", 
+       y = "Mean absolute error") +
+  facet_grid(p2 ~ gamma2, labeller = label_parsed, scales = "free") +
+  theme_base(base_size = 12, base_family = "Times") +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        plot.background=element_blank()) +
+  scale_fill_manual(values = my_palette)
+
+## use ggplot to plot the results
+if (q == 1) {
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_20240322_NNLS_be.pdf"))
+} else if (q == 2) {
+  pdf(paste0("plots/benchmark_sim_q_", q, "_", first_effect, "_", second_effect, "_20240322_NNLS_be.pdf"))
+}
+print(p1)
+print(p2)
+print(p3)
+dev.off()
+
+if (plot_sv) {
+  ## now plot the sv_s
+  sv_results <- sv_results[-1, ]
+  sv_results$rank <- factor(sv_results$rank, levels = as.character(1:n_sv))
+  sv_long <- pivot_longer(sv_results, cols = 4:6, names_to = "type", values_to = "sv")
+  sv_long$type <- factor(sv_long$type,
+                         levels = c("d_Y", "d_Y_lat", "d_R"),
+                         labels = c("bulk (true + latent)", "latent", "fitted residuals"))
+  
+  sv_p1 <- ggplot(sv_long, aes(x = rank, y = log10(sv), color = type)) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = paste("q =", q), x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p2 <- ggplot(sv_long %>% filter(type == "bulk (true + latent)"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Y", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p3 <- ggplot(sv_long %>% filter(type == "latent"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Latent Factors", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  sv_p4 <- ggplot(sv_long %>% filter(type == "fitted residuals"), aes(x = rank, y = log10(sv))) +
+    geom_boxplot() +
+    facet_grid(p ~ gamma) +
+    labs(title = "Sample-wise PCA on Fitted Residuals", x = "Rank", y = "log10(eigenvalue)") +
+    theme(legend.position = "bottom")
+  
+  if (q == 1) {
+    pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, ".pdf"))
+  } else if (q == 2) {
+    pdf(paste0("plots/benchmark_sim_sample_PCA_q_", q, "_", first_effect, "_", second_effect, ".pdf"))
+  }
+  
+  print(sv_p1)
+  print(sv_p2)
+  print(sv_p3)
+  print(sv_p4)
+  dev.off()
+}
+
+# svd(Y)$d[1]/sum(svd(Y)$d)
+# (svd(Y)$d[1])^2/sum(svd(Y)$d^2)
+
+
+# pdf("plots/benchmark_pca_biplot_q_1_p=0.75_gamma=4.pdf")
+# bi_ls <- get_bi_plot(true_data, orient = "gene")
+# print(bi_ls$bi_Y)
+# print(bi_ls$bi_Y_lat)
+# print(bi_ls$bi_R)
+# 
+# bi_ls <- get_bi_plot(true_data, orient = "sample")
+# print(bi_ls$bi_Y)
+# print(bi_ls$bi_Y_lat)
+# print(bi_ls$bi_R)
+# dev.off()
+
+## let's test out some PCA functions
+# A = matrix(1:12, 3, 4)
+# M_j = matrix(1/3, 3, 3)
+# A_cent = (diag(1, 3, 3) - M_j) %*% A
+# 
+# prcomp(A)
+# prcomp(A_cent) # same eigenvalues

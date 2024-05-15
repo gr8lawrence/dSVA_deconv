@@ -106,7 +106,12 @@ autoplot(pca, data = col_data, colour = "group")
 
 
 ## deconvolution with dSVA
-q_hat <- estimate_n_comp(Y = bulk_mat, Theta = sig_mat, intercept = FALSE, method = "cutoff", B = 49, seed = 100) 
+q_hat <- estimate_n_comp(Y = bulk_mat, 
+                         Theta = sig_mat, 
+                         intercept = FALSE,
+                         method = "cutoff",
+                         B = 49, 
+                         seed = 100) 
 # q_hat2 <- estimate_n_comp(Y = bulk_mat, Theta = sig_mat, intercept = TRUE, method = "be", B = 49, seed = 100) # 2
 
 # q_hat = 0

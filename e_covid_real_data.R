@@ -4,6 +4,7 @@ library(biomaRt)
 library(ggfortify)
 library(ggrepel)
 library(gprofiler2)
+library(ggthemes)
 
 ## download the bulk and single cell data for the covid project
 
@@ -42,10 +43,22 @@ pca <- prcomp(t(covid_mat_filtered), scale. = TRUE, center = TRUE)
 samp_id <- str_split_i(colnames(covid_mat_filtered), "_", 1)
 plot(pca$sdev[1:20]^2, main = "Elbow Plot \nEigenvalues of Raw Bulk Matrix (COVID-19 Study)", ylab = "Eigenvalue",
      log = "y")
+
+## autoplot
 autoplot(pca, data = covid_bulk_cols, colour = "disease_state") +
   labs(title = "PC of COVID-19 Bulk Samples", subtitle = "By Disease States") +
   geom_label_repel(aes(label = samp_id)) +
   ggpubr::theme_pubr() +
+  ggsci::scale_color_tron(name = "Disease state")
+
+# my_palette <- c("#ffd380", "#ff8531", "#ff6361", "#bc5090", "#8a508f", "#2c4875")
+autoplot(pca, data = covid_bulk_cols, colour = "disease_state") +
+  labs(title = "PCA Plot on COVID-19 Bulk Expression") +
+  geom_label_repel(aes(label = samp_id)) +
+  theme_base(base_size = 12, base_family = "Times") +
+  theme(legend.position = "bottom", 
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        plot.background=element_blank()) +
   ggsci::scale_color_tron(name = "Disease state")
  
 autoplot(pca, data = covid_bulk_cols, colour = "disease_state") +
@@ -216,10 +229,15 @@ B_sig <- rowMeans(sorted_lines_mat[, grepl("_B_", colnames(sorted_lines_mat))])
 NK_sig <- rowMeans(sorted_lines_mat[, grepl("_NK_", colnames(sorted_lines_mat))])
 Mono_sig <- rowMeans(sorted_lines_mat[, grepl("_Mono_", colnames(sorted_lines_mat))])
 DC_sig <- rowMeans(sorted_lines_mat[, grepl("_DC_", colnames(sorted_lines_mat))])
+Neut_sig <- rowMeans(sorted_lines_mat[, grepl("_Neut_", colnames(sorted_lines_mat))])
+
 sig_total_mat <- cbind(T_sig, B_sig, NK_sig, Mono_sig, DC_sig)
 colnames(sig_total_mat) <- c("T", "B", "NK", "Mono", "DC")
-
 saveRDS(sig_total_mat, "../dSVA_datasets/GSE64655_sorted_count_processed.rds")
+
+sig_total_mat <- cbind(T_sig, B_sig, NK_sig, Mono_sig, DC_sig, Neut_sig)
+colnames(sig_total_mat) <- c("T", "B", "NK", "Mono", "DC", "Neut")
+saveRDS(sig_total_mat, "../dSVA_datasets/GSE64655_sorted_count_whole_blood_processed.rds")
 
 ## only use the Day 0 data
 T_sig <- rowMeans(sorted_lines_mat[, grepl("_T_0d", colnames(sorted_lines_mat))])
@@ -227,8 +245,12 @@ B_sig <- rowMeans(sorted_lines_mat[, grepl("_B_0d", colnames(sorted_lines_mat))]
 NK_sig <- rowMeans(sorted_lines_mat[, grepl("_NK_0d", colnames(sorted_lines_mat))])
 Mono_sig <- rowMeans(sorted_lines_mat[, grepl("_Mono_0d", colnames(sorted_lines_mat))])
 DC_sig <- rowMeans(sorted_lines_mat[, grepl("_DC_0d", colnames(sorted_lines_mat))])
+Neut_sig <- rowMeans(sorted_lines_mat[, grepl("_Neut_0d", colnames(sorted_lines_mat))])
+
 sig_total_mat_0d <- cbind(T_sig, B_sig, NK_sig, Mono_sig, DC_sig)
 colnames(sig_total_mat_0d) <- c("T", "B", "NK", "Mono", "DC")
-
 saveRDS(sig_total_mat_0d, "../dSVA_datasets/GSE64655_sorted_count_0d_processed.rds")
 
+sig_total_mat <- cbind(T_sig, B_sig, NK_sig, Mono_sig, DC_sig, Neut_sig)
+colnames(sig_total_mat) <- c("T", "B", "NK", "Mono", "DC", "Neut")
+saveRDS(sig_total_mat, "../dSVA_datasets/GSE64655_sorted_count_whole_blood_0d_processed.rds")

@@ -43,78 +43,79 @@ NNLS_ext <- function(Y, Theta, alg = c("nnls", "pnnls"), intercept = TRUE, centr
 # sol <- NNLS_ext(Y = true_data$Y, Theta = true_data$X, alg = "pnnls")
 
 ## limma-extended (for one batch, blind to the )
-limma_ext <- function(Y, Theta, batch, intercept = TRUE, ...) {
+limma_ext <- function(Y, Theta, batch, intercept = TRUE, alg = c("nnls", "pnnls"), ...) {
   ## adjust for batch effects on the log-expression
   log_Y <- log(Y)
   log_Y2 <- limma::removeBatchEffect(x = log_Y, batch = batch, ...)
   Y2 <- exp(log_Y2)
   
   ## get P_hat on adjusted Y the using pnnls
-  P_hat <- NNLS_ext(Y = Y2, Theta = Theta, alg = "pnnls", intercept = TRUE, centralized_residual = FALSE)
+  P_hat <- NNLS_ext(Y = Y2, Theta = Theta, alg = alg, intercept = intercept, centralized_residual = FALSE)
   
   ## return P_hat
   P_hat
 }
 
 ## RUVr-extended (control gene information needed)
-RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
-  # Y <- true_data$Y
-  # Theta <- true_data$X
-  
-  ## control genes are listed as those corresponding to hidden factor 1 unless otherwise provided
-  if (is.null(ctl_gene)) {
-    # m <- nrow(Y)
-    # ctl <- rep(TRUE, m)
-    # m1 <- ceiling(m/4)
-    # m2 <- floor(m/4)
-    # ctl[c(seq(m1), seq(m - m2 + 1, m))] <- FALSE
-    ## every gene is a control gene
-    ctl <- rep(TRUE, m)
-  }
-
-  
-  ## adjust for batch effects on the original expression
-  if (intercept) {
-    ## add an intercept to the model matrix
-    X <- model.matrix(~1 + Theta)
-  } else {
-    X <- Theta
-  }
-  
-  ## obtain the canonical model residual
-  svd_X <- svd(X)
-  U_x <- svd_X$u
-  Sigma_x <- svd_X$d
-  V_x <- svd_X$v
-  B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
-  R <- Y - X %*% B_star_hat
-  
-  ## adjust the original Y based on the residuals
-  Y2 <- RUVSeq::RUVr(x = Y, cIdx = ctl, k = n_comp, residuals = R, ...)
-  
-  ## use the described method in RUVr manuscript to finish the method
-  ## perform an SVD on the residual
-  # svd_R <- svd(R)
-  # if (n_comp == 1) {
-  #   W_hat <- as.matrix(svd_R$u[, 1]) * svd_R$d[1]
-  # } else {
-  #   W_hat <- svd_R$u[, seq(n_comp)] %*% diag(svd_R$d[seq(n_comp)])
-  # }
-  
-  ## create a new feature matrix
-  # if (intercept) {
-  #   X_new <- model.matrix(~1 + cbind(W_hat, Theta))
-  # } else {
-  #   X_new <- cbind(W_hat, Theta)
-  # }
-  # B_hat <- apply(Y_cen, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = 1)$x})
-  # P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
-  
-  ## get P_hat on adjusted Y the using pnnls
-  P_hat <- NNLS_ext(Y = Y2$normalizedCounts, Theta = Theta, alg = "pnnls", intercept = TRUE, centralized_residual = FALSE)
-  ## return P_hat
-  return(P_hat)
-}
+## 20240229: Removed from comparison due to poor performance
+# RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, alg = c("nnls", "pnnls"), ...) {
+#   # Y <- true_data$Y
+#   # Theta <- true_data$X
+#   
+#   ## control genes are listed as those corresponding to hidden factor 1 unless otherwise provided
+#   if (is.null(ctl_gene)) {
+#     # m <- nrow(Y)
+#     # ctl <- rep(TRUE, m)
+#     # m1 <- ceiling(m/4)
+#     # m2 <- floor(m/4)
+#     # ctl[c(seq(m1), seq(m - m2 + 1, m))] <- FALSE
+#     ## every gene is a control gene
+#     ctl <- rep(TRUE, m)
+#   }
+# 
+#   
+#   ## adjust for batch effects on the original expression
+#   if (intercept) {
+#     ## add an intercept to the model matrix
+#     X <- model.matrix(~1 + Theta)
+#   } else {
+#     X <- Theta
+#   }
+#   
+#   ## obtain the canonical model residual
+#   svd_X <- svd(X)
+#   U_x <- svd_X$u
+#   Sigma_x <- svd_X$d
+#   V_x <- svd_X$v
+#   B_star_hat <- V_x %*% diag(1/Sigma_x^2) %*% t(V_x) %*% t(X) %*% Y   
+#   R <- Y - X %*% B_star_hat
+#   
+#   ## adjust the original Y based on the residuals
+#   Y2 <- RUVSeq::RUVr(x = Y, cIdx = ctl, k = n_comp, residuals = R, ...)
+#   
+#   ## use the described method in RUVr manuscript to finish the method
+#   ## perform an SVD on the residual
+#   # svd_R <- svd(R)
+#   # if (n_comp == 1) {
+#   #   W_hat <- as.matrix(svd_R$u[, 1]) * svd_R$d[1]
+#   # } else {
+#   #   W_hat <- svd_R$u[, seq(n_comp)] %*% diag(svd_R$d[seq(n_comp)])
+#   # }
+#   
+#   ## create a new feature matrix
+#   # if (intercept) {
+#   #   X_new <- model.matrix(~1 + cbind(W_hat, Theta))
+#   # } else {
+#   #   X_new <- cbind(W_hat, Theta)
+#   # }
+#   # B_hat <- apply(Y_cen, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = 1)$x})
+#   # P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
+#   
+#   ## get P_hat on adjusted Y the using pnnls
+#   P_hat <- NNLS_ext(Y = Y2$normalizedCounts, Theta = Theta, alg = alg, intercept = intercept, centralized_residual = FALSE)
+#   ## return P_hat
+#   return(P_hat)
+# }
 
 
 ## RUV4-extended
@@ -145,8 +146,8 @@ RUVr_ext <- function(Y, Theta, n_comp, ctl_gene = NULL, intercept = TRUE, ...) {
   # if (intercept) P_hat <- P_hat[-1, ]
 # }
 
-## if when the true data is known
-get_p_known <- function(true_data, first_effect, intercept = FALSE) {
+## if when the true Z is known
+get_p_known <- function(true_data, first_effect, intercept = TRUE, alg = c("nnls", "pnnls")) {
   if (intercept) {
     ## adding an intercept also makes the known method better
     X <- model.matrix(~1 + true_data$X)
@@ -160,20 +161,72 @@ get_p_known <- function(true_data, first_effect, intercept = FALSE) {
   }
   if (first_effect == "cc") {
     ## recovering the true proportions under separate gene signatures for the cc structure
-    P <- cbind(
-      apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x}),
-      apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
-    )
+    if (alg == "pnnls") {
+      # P <- cbind(
+      #   apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x}),
+      #   apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+      # )
+      P <- cbind(
+        apply(true_data$X %*% true_data$P_circ[, true_data$D[1, ] == 0] + true_data$E[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x}),
+        apply((true_data$X + true_data$X2) %*% true_data$P1[, true_data$D[1, ] == 1] + true_data$E[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+      )
+    } else if (alg == "nnls") {
+      # P <- cbind(
+      #   apply(true_data$Y[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X))$x}),
+      #   apply(true_data$Y[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X))$x})
+      # )
+      P <- cbind(
+        apply(true_data$X %*% true_data$P_circ[, true_data$D[1, ] == 0] + true_data$E[, true_data$D[1, ] == 0], 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X))$x}),
+        apply((true_data$X + true_data$X2) %*% true_data$P1[, true_data$D[1, ] == 1] + true_data$E[, true_data$D[1, ] == 1], 2, function(y) {lsei::pnnls(a = X2, b = y, k = ncol(X) - ncol(true_data$X))$x})
+      )
+    }
   } else {
     ## for the rest
-    P <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+    if (alg == "pnnls") {
+      P <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X), sum = 1)$x})
+    } else if (alg == "nnls") {
+      P <- apply(true_data$X %*% true_data$P_star + true_data$E, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(true_data$X))$x})
+    }
   }
-  if (intercept) {
-    return(P[-1, ])
-  } else {
-    return(P)
+  
+  ## specify the return based on the function
+  if (alg == "pnnls") {
+    if (intercept) {
+      return(P[-1, ])
+    } else {
+      return(P)
+    }
+  } else if (alg == "nnls") {
+    if (intercept) {
+      P2 <- P[-1, ]
+      return(apply(P2, 2, function(x) x/sum(x)))
+    } else {
+      return(apply(P, 2, function(x) x/sum(x)))
+    }
   }
 }
+
+## ComBat and ComBat-seq
+# batch = c(rep(0, ncol(Y)/2), rep(1, ncol(Y)/2))
+
+combat_ext <- function(Y, Theta, batch, intercept = TRUE, combat_seq = FALSE, alg = c("nnls", "pnnls"), ...) {
+  
+  if (!combat_seq){
+    ## adjust for batch effects on the log-expression
+    log_Y <- log(Y)
+    keep_rows <- apply(log_Y, 1, function(x) !any(x == -Inf)) # if there is a value == -Inf after transformation, delete the row
+    log_Y2 <- sva::ComBat(dat = log_Y[keep_rows, ], batch = batch, ...)
+    Y2 <- exp(log_Y2)
+    P_hat <- NNLS_ext(Y = Y2, Theta = Theta[keep_rows, ], alg = alg, intercept = intercept, centralized_residual = FALSE)
+  } else {
+    ## use the raw expression to adjust for batch effects
+    Y3 <- sva::ComBat_seq(counts = Y, batch = batch, ...)
+    P_hat <- NNLS_ext(Y = Y3, Theta = Theta, alg = alg, intercept = intercept, centralized_residual = FALSE)
+  }
+  ## return P_hat
+  P_hat
+}
+
 
 ## compare methods
 # X <- model.matrix(~ 1 + true_data$X)

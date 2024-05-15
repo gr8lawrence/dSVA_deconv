@@ -94,6 +94,218 @@ dsva_for_sim <- function(Y, Theta, n_comp = 0, alg = c("nnls", "pnnls"), interce
 }
 
 
+## 20240210: write the full dSVA algorithm that outputs every relevant results
+dsva_deconv <- function(Y, Theta, n_comp = 0, alg = c("nnls", "pnnls"), intercept = TRUE, solver = c("lsei", "cvxr"), ...) {
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  ## add an intercept if chosen
+  if (intercept) {
+    X <- model.matrix(~1 + Theta)
+  } else {
+    X <- Theta
+  }
+  
+  if (n_comp == 0) {
+    message("Specifying number of latent factors = 0.")
+    if (solver == "lsei") {
+      if (alg == "pnnls") {
+        B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(Theta), sum = 1)$x})
+        if (intercept) P_hat <- B_hat[-1, ] else P_hat <- B_hat
+        
+      } else if (alg == "nnls") {
+        B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X, b = y, k = ncol(X) - ncol(Theta))$x})
+        if (intercept) P_tilde <- B_hat[-1, ] else P_tilde <- B_hat
+        P_hat <- apply(P_tilde, 2, function(x) x/sum(x))
+      }
+      
+    } else if (solver == "cvxr") {
+      P_hat <- apply(Y, 2, function(y) cvxr_NNLS_ext(y = y, X = X, k_no = ncol(X) - ncol(Theta), alg = alg))
+      
+    }
+    if (solver == "lsei") SSR <- norm(Y - (X %*% B_hat), "F")^2 else SSR <- NULL
+    
+    ls_return <- list(
+      with_intercept = intercept,
+      Gamma_hat = NULL,
+      P_hat = P_hat,
+      SSR = SSR
+    )
+    return(ls_return)
+  }
+  
+  ## step 1: obtain the canonical model residual (using linear regression here instead of PNNLS)
+  B_star_hat <- solve(t(X) %*% X) %*% t(X) %*% Y  
+  R <- Y - X %*% B_star_hat
+  
+  ## step 2: svd on the residual space
+  svd_R <- svd(R)
+  if (n_comp == 1) {
+    U_q <- as.matrix(svd_R$u[, 1]) 
+    Psi_hat <- rbind(svd_R$d[1] %*% t(svd_R$v)[1, ])
+    
+  } else {
+    U_q <- svd_R$u[, seq(n_comp)]
+    Psi_hat <- diag(svd_R$d[seq(n_comp)]) %*% t(svd_R$v)[seq(n_comp), ]
+  }
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat1 <- Psi_hat - apply(Psi_hat, 1, mean)
+  C <- Psi_hat1 %*% t(Psi_hat1) 
+  if (n_comp == 1) {
+    if (1 / C[1, 1] < 1e-15) message("q_hat = 1 and the inverse of Psi_hat %*% D_jn %*% t(Psi_hat) is smaller than 1e-15.")
+    Gamma_hat <- U_q + (X %*% B_star_hat %*% t(Psi_hat1)) / C[1, 1]
+    
+  } else {
+    if (1 / kappa(C) < 1e-15) message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is close to singular, i.e. its reverse condition number < 1e-15.")
+    svd_C <- svd(C)  # use svd to invert C to mitigate invertibility issues
+    C_inv <- svd_C$u %*% diag(1/svd_C$d) %*% t(svd_C$v)
+    Gamma_hat <- U_q + X %*% B_star_hat %*% t(Psi_hat1) %*% C_inv
+  }
+  
+  ## step 4: fitting the model again with the surrogate variable (using NNLS or PNNLS)
+  X_new <- cbind(Gamma_hat, X)
+  
+  if (solver == "lsei") {
+    if (alg == "pnnls") {
+      B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = 1)$x})
+      P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
+      # Psi_hat_final <- B_hat[ncol(Gamma_hat), ]
+      
+    } else if (alg == "nnls") {
+      B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta), sum = NULL)$x})
+      P_tilde <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
+      P_hat <- apply(P_tilde, 2, function(x) x/sum(x))
+      # Psi_hat_final <- B_hat[ncol(Gamma_hat), ]
+      
+    }
+    
+  } else if (solver == "cvxr") {
+    P_hat <- apply(Y, 2, function(y) cvxr_NNLS_ext(y = y, X = X_new, k_no = ncol(X_new) - ncol(Theta), alg = alg, ...))
+  }
+  
+  ## return the values
+  if (solver == "lsei") SSR <- norm(Y - (X_new %*% B_hat), "F")^2 else SSR <- NULL
+  
+  ls_return <- list(
+    with_intercept = intercept,
+    Gamma_hat = Gamma_hat,
+    P_hat = P_hat,
+    SSR = SSR
+  )
+  return(ls_return)
+}
+
+## TODO: allow the dsva deconvolution to remove a cell type during the estimation process of the residuals
+dsva_deconv_v2 <- function(Y, Theta, n_comp = 0, exclude = NULL, alg = c("nnls", "pnnls"), intercept = TRUE, solver = c("lsei", "cvxr"), ...) {
+  n <- ncol(Y)
+  m <- nrow(Y)
+  
+  if (!is.null(exclude)) Theta1 <- Theta[, -exclude] else Theta1 <- Theta
+  
+  ## add an intercept if chosen
+  if (intercept) {
+    # X <- model.matrix(~1 + Theta)
+    X1 <- model.matrix(~1 + Theta1)
+  } else {
+    # X <- Theta
+    X1 <- Theta1
+  }
+  
+  if (n_comp == 0) {
+    message("Specifying number of latent factors = 0.")
+    if (solver == "lsei") {
+      if (alg == "pnnls") {
+        B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X1, b = y, k = ncol(X1) - ncol(Theta1), sum = 1)$x})
+        if (intercept) P_hat <- B_hat[-1, ] else P_hat <- B_hat
+      } else if (alg == "nnls") {
+        B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X1, b = y, k = ncol(X1) - ncol(Theta1))$x})
+        if (intercept) P_tilde <- B_hat[-1, ] else P_tilde <- B_hat
+        P_hat <- apply(P_tilde, 2, function(x) x/sum(x))
+      }
+      
+    } else if (solver == "cvxr") {
+      P_hat <- apply(Y, 2, function(y) cvxr_NNLS_ext(y = y, X = X1, k_no = ncol(X) - ncol(Theta1), alg = alg))
+      
+    }
+    if (solver == "lsei") SSR <- norm(Y - (X1 %*% B_hat), "F")^2 else SSR <- NULL
+    
+    ls_return <- list(
+      with_intercept = intercept,
+      q_hat = 0,
+      Gamma_hat = NULL,
+      P_hat = P_hat,
+      SSR = SSR
+    )
+    return(ls_return)
+  }
+  
+  ## step 1: obtain the canonical model residual (using linear regression here instead of PNNLS)
+  B_star_hat <- solve(t(X1) %*% X1) %*% t(X1) %*% Y  
+  R <- Y - X1 %*% B_star_hat
+  
+  ## step 2: svd on the residual space
+  svd_R <- svd(R)
+  if (n_comp == 1) {
+    U_q <- as.matrix(svd_R$u[, 1]) 
+    Psi_hat <- rbind(svd_R$d[1] %*% t(svd_R$v)[1, ])
+    
+  } else {
+    U_q <- svd_R$u[, seq(n_comp)]
+    Psi_hat <- diag(svd_R$d[seq(n_comp)]) %*% t(svd_R$v)[seq(n_comp), ]
+  }
+  
+  ## step 3: estimate the surrogate variable
+  Psi_hat1 <- Psi_hat - apply(Psi_hat, 1, mean)
+  C <- Psi_hat1 %*% t(Psi_hat1) 
+  if (n_comp == 1) {
+    if (1 / C[1, 1] < 1e-15) message("q_hat = 1 and the inverse of Psi_hat %*% D_jn %*% t(Psi_hat) is smaller than 1e-15.")
+    Gamma_hat <- U_q + (X1 %*% B_star_hat %*% t(Psi_hat1)) / C[1, 1]
+    
+  } else {
+    if (1 / kappa(C) < 1e-15) message("q_hat > 1 and Psi_hat %*% D_jn %*% t(Psi_hat) is close to singular, i.e. its reverse condition number < 1e-15.")
+    svd_C <- svd(C)  # use svd to invert C to mitigate invertibility issues
+    C_inv <- svd_C$u %*% diag(1/svd_C$d) %*% t(svd_C$v)
+    Gamma_hat <- U_q + X1 %*% B_star_hat %*% t(Psi_hat1) %*% C_inv
+  }
+  
+  ## step 4: fitting the model again with the surrogate variable (using NNLS or PNNLS)
+  X_new <- cbind(Gamma_hat, X1)
+  # dim(cbind(Gamma_hat, X))
+  
+  if (solver == "lsei") {
+    if (alg == "pnnls") {
+      B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta1), sum = 1)$x})
+      if (!is.null(exclude))  P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta) + length(exclude)), ] else P_hat <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ] 
+     
+      # Psi_hat_final <- B_hat[ncol(Gamma_hat), ]
+      
+    } else if (alg == "nnls") {
+      B_hat <- apply(Y, 2, function(y) {lsei::pnnls(a = X_new, b = y, k = ncol(X_new) - ncol(Theta1), sum = NULL)$x})
+      if (!is.null(exclude)) P_tilde <- B_hat[-seq(ncol(X_new) - ncol(Theta) + length(exclude)), ] else P_tilde <- B_hat[-seq(ncol(X_new) - ncol(Theta)), ]
+      P_hat <- apply(P_tilde, 2, function(x) x/sum(x))
+      # Psi_hat_final <- B_hat[ncol(Gamma_hat), ]
+      
+    }
+    
+  } else if (solver == "cvxr") {
+    P_hat <- apply(Y, 2, function(y) cvxr_NNLS_ext(y = y, X = X_new, k_no = ncol(X_new) - ncol(Theta1), alg = alg, ...))
+  }
+  
+  ## return the values
+  if (solver == "lsei") SSR <- norm(Y - (X_new %*% B_hat), "F")^2 else SSR <- NULL
+  
+  ls_return <- list(
+    with_intercept = intercept,
+    q_hat = n_comp,
+    Gamma_hat = Gamma_hat,
+    P_hat = P_hat,
+    SSR = SSR
+  )
+  return(ls_return)
+}
+
+
 
 ## a first pass method to find the number of components
 estimate_n_comp_cutoff <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRUE) {
@@ -210,7 +422,7 @@ estimate_n_comp_tw <- function(R = NULL, Y = NULL, Theta = NULL, intercept = TRU
 
 ## an upper-level function to include both methods
 estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B = 49, seed = NULL, intercept = TRUE, ...) {
-  
+  message(paste0("Running ", method, " for estimating q."))
   if (method == "be") {
     n_comp <- estimate_n_comp_be(R = R, Y = Y, Theta = Theta, seed = seed, intercept = intercept, ...)
   } else if (method == "tw") {
