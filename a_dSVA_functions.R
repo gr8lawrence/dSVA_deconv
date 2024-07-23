@@ -430,7 +430,7 @@ estimate_n_comp <- function(R = NULL, Y = NULL, Theta = NULL, method = "be", B =
   } else if (method == "cutoff") {
     n_comp <- estimate_n_comp_cutoff(R = R, Y = Y, Theta = Theta, intercept = TRUE)
   } else {
-    stop("Methods has to be either 'be' or 'cutoff'.")
+    stop("Methods has to be either 'be', 'tw', or 'cutoff'.")
   }
   return(n_comp)
 }

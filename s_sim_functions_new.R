@@ -353,6 +353,47 @@ dSVA_model_sim_pert <- function(m, n, K, q = 1, p_sig = 0.5, lambda = 3, chi_df 
   return(ls)
 }
 
+## TODO: 2024/07 write a function to simulate missing CT
+dSVA_model_sim_missing <- function(m, n, K, q = 1, p_sig = 0.5, lambda = 3, chi_df = 200, err = FALSE) {
+  # set.seed(100) # simulate a data for plotting
+  
+  sig_ls <- get_signatures(m, n, K + q, p_sig, lambda, chi_df)
+  X <- sig_ls$X[, seq(K)]
+  Z <- sig_ls$X[, seq(K + 1, K + q)]
+  W <- sig_ls$W
+  P_tilde <- t(extraDistr::rdirichlet(n = n, alpha = c(rep(1, K), rep(5, q))))
+  # P_tilde <- t(extraDistr::rdirichlet(n = n, alpha = rep(1, K + q)))
+  P_star <- P_tilde[seq(K), ]
+  Dmat <- P_tilde[seq(K + 1, K + q), ]
+  Y <- sig_ls$X %*% P_tilde 
+  if (q > 1) {
+    Y_lat <- Z %*% Dmat 
+  } else {
+    Z_mat <- matrix(Z, ncol = q, byrow = FALSE)
+    D_mat <- matrix(Dmat, nrow = q, byrow = TRUE)
+    Y_lat <- Z_mat %*% D_mat 
+  }
+  
+  ## add errors
+  if (err) {
+    E <- matrix(0, nrow = m, ncol = n)
+    for (i in 1:m) {
+      E[i, ] <- rnorm(n, mean(Y[i, ]), sqrt(mean(Y[i, ])/5))
+      # E[i, ] <- rnorm(n, 0, sqrt(mean(Y[i, ])/5))
+    }
+    Y <- Y + E
+  } else {
+    E <- NA
+  }
+  
+  p_neg <- sum(Y < 0)/(m * n)
+  Y[Y < 0] <- 0
+  
+  ls <- list(X = X, P_star = P_star, D = Dmat, Z = Z, Y = Y, E = E, Y_lat = Y_lat, W = W, p_neg = p_neg)
+  return(ls)
+}
+
+
 ## plot the expression and proportion changes on the simulated data
 ## m = 2,000, n = 40, K = 10, p_sig = .25, lambda = 5, chi_df = 200, err = TRUE, p_pert = .75, seed = 100
 # p_sig = .25

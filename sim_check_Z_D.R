@@ -2,7 +2,7 @@
 source("s_sources.R")
 set.seed(100)
 
-## run simulations when the proportion of genes affected in Theta2 is changed
+## This file check if the estimated gamma and psi can recover the original Z and D
 
 ## command line arguments (q and first_effect)
 # cmd_args <- commandArgs(TRUE)
@@ -70,7 +70,7 @@ for (p in p_sig) {
  
       ## create a list to hold all the estimated proportions
       P_hat_ls <- list()
-      true_data <- dSVA_model_sim_pert(m, n, K, q, p, lambda, err = err, p_pert = p_pert)
+      true_data <- dSVA_model_sim_missing(m, n, K, q, p, lambda, err = err)
       
       ## estimate n_comp once for each setting
       if (b == 1) dSVA_n_comp <- estimate_n_comp(Y = true_data$Y, Theta = true_data$X, method = "be", B = 49, seed = 100)
@@ -96,9 +96,9 @@ for (p in p_sig) {
       
       ## if we know the underlying truths
       # Theta_full <- cbind(true_data$X, true_data$Z)
-      # P_hat_ls$known <- NNLS_ext(Y = true_data$Y, Theta = Theta_full, alg = "pnnls", centralized_residual = FALSE)
+      P_hat_ls$known <- NNLS_ext(Y = true_data$Y - true_data$Y_lat, Theta = true_data$X, alg = "pnnls", centralized_residual = FALSE)
       
-      P_hat_ls$known <- get_p_known(true_data, "cc", TRUE, "pnnls")
+      # P_hat_ls$known <- get_p_known(true_data, "cc", TRUE, "pnnls")
        
       # if (first_effect == "cc") {
       #   P_hat_ls$known <- cbind(
